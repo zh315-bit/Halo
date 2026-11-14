@@ -391,6 +391,13 @@ class Citation(_Strict):
     sources: list[CitationSource] = Field(default_factory=list)   # sos-v2
 
 
+class AskExplanation(_Strict):          # sos-v2: model restatement shown under a fixed "not covered" reply
+    source: Literal["llm"]
+    label: Literal["AI explanation"]
+    text: str
+    citations: list[Citation]
+
+
 class AskResponse(_Strict):
     answer: str
     citations: list[Citation]
@@ -398,6 +405,7 @@ class AskResponse(_Strict):
     answered_by: Literal["llm", "fixed_reply"]
     mode: Mode
     disclaimer: Literal["Decision support only. Not a diagnosis."]
+    explanation: Optional[AskExplanation] = None   # sos-v2: only with the fixed reply; passed every guard
 
 
 # ---------- 6.5 DailyReport ----------

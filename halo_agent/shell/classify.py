@@ -5,9 +5,11 @@ a checklist. Offline / no LLM / bad output -> the full picker (`source: picker_f
 
 from __future__ import annotations
 
+import copy
 import json
 from typing import Optional
 
+from .cache import cacheable, get_cache
 from .llm import LLMClient, call_llm, extract_json
 
 SYSTEM = """You sort a crew member's short description of a problem into one of a fixed list of problem types.
@@ -54,12 +56,32 @@ def parse(raw: Optional[str], symptoms: list[str]) -> Optional[list[dict]]:
     return out
 
 
+PROMPT_VERSION = "classify-v1"     # bump when SYSTEM or the prompt shape changes (part of the cache key)
+
+
+def clear_cache() -> int:
+    return get_cache().clear()
+
+
 def classify(free_text: str, symptoms: list[str], llm: LLMClient, mode: str,
              min_confidence: float) -> dict:
-    raw = call_llm(llm, SYSTEM, _prompt(free_text, symptoms), mode)
+    """Same text + same problem types -> same candidates: the first model answer is cached persistently
+    (shell/cache.py; the model takes no temperature, so repeat calls are not guaranteed identical otherwise)."""
+    prompt = _prompt(free_text, symptoms)
+    norm = _prompt(" ".join(free_text.split()).lower(), symptoms)        # key only: case/space-insensitive
+    key = json.dumps([PROMPT_VERSION, getattr(llm, "model", "") or llm.name, norm], ensure_ascii=False)
+    hit = get_cache().get("classify", key) if cacheable(llm) else None
+    if hit is not None and mode != "offline" and llm.available():
+        out = copy.deepcopy(hit)
+        out["low_confidence"] = out["candidates"][0]["confidence"] < min_confidence
+        return out
+    raw = call_llm(llm, SYSTEM, prompt, mode)
     cands = parse(raw, symptoms) if raw is not None else None
     if cands is None:
         return {"candidates": picker(symptoms), "source": "picker_fallback", "requires_confirmation": True,
                 "low_confidence": False}
-    return {"candidates": cands, "source": "llm", "requires_confirmation": True,
-            "low_confidence": cands[0]["confidence"] < min_confidence}
+    out = {"candidates": cands, "source": "llm", "requires_confirmation": True,
+           "low_confidence": cands[0]["confidence"] < min_confidence}
+    if cacheable(llm):
+        get_cache().put("classify", key, out)
+    return out

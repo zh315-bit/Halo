@@ -8,6 +8,7 @@ from typing import Optional
 from fastapi import APIRouter, BackgroundTasks, HTTPException
 
 from halo_agent.shell import ask, classify
+from halo_agent.shell.cache import get_cache
 from halo_agent.shell.llm import LLMClient, get_llm as _env_llm
 from halo_agent.sos.nudge import NudgeService, NudgeStateError, UnknownNudge, attach
 from halo_agent.sos.service import DISCLAIMER, SosService, UnknownSession
@@ -159,11 +160,16 @@ def agent_ask(req: AskRequest) -> dict:
     if req.session_id:
         _run(svc.record_ask, req.session_id, req.question, out)
     step = (ctx or {}).get("step") or {}
-    cites = [{"kind": "checklist_step", "id": c, "ref": step.get("ref") if c == step.get("id") else None,
-              "sources": [{k: s[k] for k in ("key", "title", "url", "medical")} for s in step.get("sources", [])]
-              if c == step.get("id") else []} for c in out["citations"]]
-    return {**out, "citations": cites,
-            "session_id": req.session_id, "mode": mode, "disclaimer": DISCLAIMER}
+
+    def cite(ids):
+        return [{"kind": "checklist_step", "id": c, "ref": step.get("ref") if c == step.get("id") else None,
+                 "sources": [{k: s[k] for k in ("key", "title", "url", "medical")} for s in step.get("sources", [])]
+                 if c == step.get("id") else []} for c in ids]
+    exp = out.get("explanation")
+    if exp:
+        exp = {**exp, "citations": cite(exp["citations"])}
+    return {"answer": out["answer"], "citations": cite(out["citations"]), "answered_by": out["answered_by"],
+            "explanation": exp, "session_id": req.session_id, "mode": mode, "disclaimer": DISCLAIMER}
 
 
 # ---------- §8.5 proactive nudge ----------
@@ -189,4 +195,12 @@ def nudge_accept(nudge_id: str, req: NudgeAcceptRequest, bg: BackgroundTasks) ->
     n, session, jobs = _run(get_nudges().accept, nudge_id, req.symptom)
     _schedule(bg, jobs)
     return {"nudge": n, "session": session}
+
+
+# ---------- admin: persistent LLM cache (shell/cache.py) ----------
+@router.delete("/admin/llm-cache")
+def admin_clear_llm_cache() -> dict:
+    """Empty data/llm_cache.json (ask + classify). The next question goes to the model again."""
+    cache = get_cache()
+    return {"cleared": cache.clear(), "file": cache.path.name}
 

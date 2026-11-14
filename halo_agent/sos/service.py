@@ -200,13 +200,16 @@ class SosService:
             # The reviewer `note` is deliberately left out: it is not an instruction.
             return {"step": {"id": st.id, "text": st.text, "ref": st.ref,
                              "sources": [c.sources[k].as_dict() for k in st.sources]},
+                    "reading_id": v.get("reading_id"),
                     "vitals": {k: m.get("value") for k, m in (v.get("metrics") or {}).items()}}
 
     def record_ask(self, session_id: str, question: str, result: dict) -> None:
         with self._lock:
             s = self._get(session_id)
+            exp = result.get("explanation")
             s.overlay("ask", self.now(), "crew", question=question, answered_by=result["answered_by"],
-                      citations=result["citations"])
+                      citations=result["citations"], not_covered=result.get("not_covered"),
+                      rejected=result.get("rejected"), explanation=exp["text"] if exp else None)
             self._persist(s)
 
     # ---------- internals ----------

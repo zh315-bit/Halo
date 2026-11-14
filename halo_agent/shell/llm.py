@@ -50,8 +50,9 @@ class FakeLLM:
     (system, user). `calls` records every prompt, so tests can assert that nothing was sent."""
     name = "fake"
 
-    def __init__(self, *replies: Reply, available: bool = True):
+    def __init__(self, *replies: Reply, available: bool = True, cacheable: bool = False):
         self.replies = list(replies)
+        self.cacheable = cacheable                 # tests opt in to the persistent cache
         self.calls: list[dict] = []
         self._available = available
 
@@ -99,6 +100,7 @@ class AnthropicLLM:
     - The SDK client is created lazily on the first real call, so building this object opens no connection.
     """
     name = "anthropic"
+    cacheable = True                               # results go to the persistent cache (shell/cache.py)
 
     def __init__(self, api_key: str, model: str = DEFAULT_MODEL, effort: str = "low", max_tokens: int = 2048,
                  client_factory: Optional[Callable[[str], object]] = None):
