@@ -8,6 +8,7 @@ from typing import Optional
 from fastapi import APIRouter, BackgroundTasks, HTTPException
 
 from halo_agent.shell import ask, classify
+from halo_agent.shell.cache import get_cache
 from halo_agent.shell.llm import LLMClient, get_llm as _env_llm
 from halo_agent.sos.nudge import NudgeService, NudgeStateError, UnknownNudge, attach
 from halo_agent.sos.service import DISCLAIMER, SosService, UnknownSession
@@ -194,4 +195,12 @@ def nudge_accept(nudge_id: str, req: NudgeAcceptRequest, bg: BackgroundTasks) ->
     n, session, jobs = _run(get_nudges().accept, nudge_id, req.symptom)
     _schedule(bg, jobs)
     return {"nudge": n, "session": session}
+
+
+# ---------- admin: persistent LLM cache (shell/cache.py) ----------
+@router.delete("/admin/llm-cache")
+def admin_clear_llm_cache() -> dict:
+    """Empty data/llm_cache.json (ask + classify). The next question goes to the model again."""
+    cache = get_cache()
+    return {"cleared": cache.clear(), "file": cache.path.name}
 

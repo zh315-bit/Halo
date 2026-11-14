@@ -14,6 +14,17 @@ from halo_agent.shell.llm import AnthropicLLM, NullLLM, call_llm, get_llm
 from halo_agent.sos import service as service_mod
 from halo_agent.sos.session_log import SessionLog
 
+
+@pytest.fixture(autouse=True)
+def _isolated_llm_cache(tmp_path, monkeypatch):
+    """Never touch data/llm_cache.json from tests."""
+    from halo_agent.shell import cache as cache_mod
+    monkeypatch.setenv("HALO_LLM_CACHE_FILE", str(tmp_path / "llm_cache.json"))
+    cache_mod.reset()
+    yield
+    cache_mod.reset()
+
+
 GOOD = '[{"symptom": "breathing_difficulty", "confidence": 0.8}]'
 
 

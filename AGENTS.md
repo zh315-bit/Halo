@@ -560,10 +560,15 @@ content**: suggestions are derived from the checklists' `red_flags`.
   **AI explanation (decided 2026-11-14):** when the model sets `not_covered: true` but its restatement passes every
   guard, `answer` is the fixed reply and `explanation = {source: "llm", label: "AI explanation", text, citations}`
   is shown underneath. A covered answer that passes is the `answer` itself (`answered_by: "llm"`, no explanation).
-  **Consistency:** Claude Opus 5.5 takes no `temperature` (sampling parameters return 400), so each client keeps a
-  memo keyed on (model, exact prompt incl. step and vitals): the same question on the same step shows the same
-  result, `not_covered` flag included, for the life of the process. Errors/timeouts are not memoised.
-  `/classify` is memoised the same way (text case/space-insensitive). Live check (costs money, skipped by
+  The system prompt also forbids naming any medicine, including one named in the question ("any medicine" instead).
+  **Consistency:** Claude Opus 5.5 takes no `temperature` (sampling parameters return 400), so the first
+  model-derived result is cached in **`data/llm_cache.json`** (git-ignored; env `HALO_LLM_CACHE_FILE`; survives a
+  restart; `shell/cache.py`) and replayed: same question → same displayed result, `not_covered` flag included.
+  `/agent/ask` key: `[PROMPT_VERSION, model, step id, step-text hash, normalized question (lowercase, collapsed
+  spaces), reading_id]`; `/classify` key: `[PROMPT_VERSION, model, normalized text + problem types]`. **Bump
+  `PROMPT_VERSION`** (`ask-v2`, `classify-v1`) whenever a system prompt or payload changes. Errors/timeouts are not
+  cached; only clients with `cacheable = True` (the real `AnthropicLLM`) are. `DELETE /api/v1/admin/llm-cache` →
+  `{cleared, file}` empties it. Live check (costs money, skipped by
   default): `HALO_LIVE_LLM=1 … pytest tests/test_sos_llm_live.py`. Offline / no LLM →
   "Not covered offline — follow the checklist". Without `session_id`: knowledge-base chunks only, with citations
   (retrieval not built yet → fixed "not covered" reply, no LLM call). Unknown `session_id` → 404. Each ask is logged

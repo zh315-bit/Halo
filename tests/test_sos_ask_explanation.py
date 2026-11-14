@@ -12,6 +12,17 @@ from halo_agent.shell.llm import FakeLLM
 from halo_agent.sos import service as service_mod
 from halo_agent.sos.session_log import SessionLog
 
+
+@pytest.fixture(autouse=True)
+def _isolated_llm_cache(tmp_path, monkeypatch):
+    """Never touch data/llm_cache.json from tests."""
+    from halo_agent.shell import cache as cache_mod
+    monkeypatch.setenv("HALO_LLM_CACHE_FILE", str(tmp_path / "llm_cache.json"))
+    cache_mod.reset()
+    yield
+    cache_mod.reset()
+
+
 ASPIRIN = "Can I give him aspirin?"
 GOOD_EXPL = ("This step doesn't say whether to give any specific medicine. It says to follow the onboard Medical "
              "Checklist and do what the flight surgeon tells you. Contact the flight surgeon before giving anything.")
@@ -28,8 +39,8 @@ def env(client, tmp_path, monkeypatch):
                                  mode_fn=routes_admin.current_mode)
     routes_sos.set_service(svc)
 
-    def use(*replies):
-        llm = FakeLLM(*replies)
+    def use(*replies, cacheable=False):
+        llm = FakeLLM(*replies, cacheable=cacheable)
         routes_sos.set_llm(llm)
         return llm
     yield {"c": client, "use": use, "svc": svc}
@@ -105,7 +116,7 @@ def test_c8_not_covered_interval_keeps_tbd_and_explains(env):
 
 
 def test_same_question_three_times_one_model_call_identical_output(env):
-    llm = env["use"](reply(GOOD_EXPL))                       # only ONE scripted reply: a 2nd call would raise
+    llm = env["use"](reply(GOOD_EXPL), cacheable=True)       # only ONE scripted reply: a 2nd call would raise
     sid = at_step(env["c"], "chest_pain", "c6")
     outs = [ask(env["c"], sid) for _ in range(3)]
     assert outs[0] == outs[1] == outs[2] and len(llm.calls) == 1
@@ -115,14 +126,14 @@ def test_same_question_three_times_one_model_call_identical_output(env):
 
 
 def test_errors_are_not_memoised(env):
-    llm = env["use"](RuntimeError("timeout"), reply(GOOD_EXPL))
+    llm = env["use"](RuntimeError("timeout"), reply(GOOD_EXPL), cacheable=True)
     sid = at_step(env["c"], "chest_pain", "c6")
     assert ask(env["c"], sid)["answer"] == ask_mod.OFFLINE_REPLY
     assert ask(env["c"], sid)["explanation"]["text"] == GOOD_EXPL and len(llm.calls) == 2
 
 
 def test_classify_memo(env):
-    llm = env["use"]('[{"symptom": "fainting", "confidence": 0.9}]')
+    llm = env["use"]('[{"symptom": "fainting", "confidence": 0.9}]', cacheable=True)
     sid = env["c"].post("/api/v1/sos", json={"crew_id": "CREW_01", "free_text": "x"}).json()["session_id"]
     outs = [env["c"].post(f"/api/v1/sos/{sid}/classify", json={"free_text": t}).json()
             for t in ("He passed out", "he passed  out", "HE PASSED OUT")]
@@ -134,3 +145,58 @@ def test_blocklist_does_not_hit_checklist_words():
     from halo_agent.sos.protocols import load_all
     words = {w for c in load_all().values() for s in c.steps for w in ask_mod._tokens(s.text)}
     assert not {w for w in words if ask_mod.is_drug(w)}
+
+
+# ---------- persistent cache ----------
+def test_cache_survives_a_restart_and_keys_on_reading_id(env, tmp_path):
+    from halo_agent.shell import cache as cache_mod
+    llm = env["use"](reply(GOOD_EXPL), reply(GOOD_EXPL), cacheable=True)
+    sid = at_step(env["c"], "chest_pain", "c6")
+    first = ask(env["c"], sid)
+    data = json.loads((tmp_path / "llm_cache.json").read_text())
+    (key,) = data["entries"]["ask"]
+    assert json.loads(key)[0] == ask_mod.PROMPT_VERSION and json.loads(key)[2] == "c6"
+    assert json.loads(key)[4] == "can i give him aspirin?" and json.loads(key)[5] == "None"
+    cache_mod.reset()                                        # "restart": re-read from disk
+    assert ask(env["c"], sid, "  can I give HIM aspirin? ") == first and len(llm.calls) == 1   # normalized question
+    env["svc"].reading_fn = lambda c: {"reading_id": "R2", "heart_rate_bpm": 80.0, "age_seconds": 0,
+                                       "metric_age_seconds": {"heart_rate_bpm": 0}}
+    env["c"].post(f"/api/v1/sos/{sid}/step", json={"action": "condition_changed"})   # refresh vitals: new reading
+    ask(env["c"], sid)
+    assert len(llm.calls) == 2                               # new reading_id -> new model call
+
+
+def test_prompt_version_change_misses_the_cache(env, monkeypatch):
+    llm = env["use"](reply(GOOD_EXPL), reply(GOOD_EXPL), cacheable=True)
+    sid = at_step(env["c"], "chest_pain", "c6")
+    ask(env["c"], sid)
+    monkeypatch.setattr(ask_mod, "PROMPT_VERSION", "ask-v999")
+    ask(env["c"], sid)
+    assert len(llm.calls) == 2
+
+
+def test_admin_delete_clears_cache(env, tmp_path):
+    llm = env["use"](reply(GOOD_EXPL), reply(GOOD_EXPL), cacheable=True)
+    sid = at_step(env["c"], "chest_pain", "c6")
+    ask(env["c"], sid)
+    r = env["c"].delete("/api/v1/admin/llm-cache").json()
+    assert r == {"cleared": 1, "file": "llm_cache.json"}
+    assert json.loads((tmp_path / "llm_cache.json").read_text())["entries"] == {}
+    ask(env["c"], sid)
+    assert len(llm.calls) == 2
+
+
+def test_unreadable_cache_file_starts_empty(env, tmp_path):
+    from halo_agent.shell import cache as cache_mod
+    (tmp_path / "llm_cache.json").write_text("{not json")
+    cache_mod.reset()
+    llm = env["use"](reply(GOOD_EXPL), cacheable=True)
+    sid = at_step(env["c"], "chest_pain", "c6")
+    assert ask(env["c"], sid)["explanation"]["text"] == GOOD_EXPL and len(llm.calls) == 1
+
+
+def test_fakes_are_not_cached_unless_they_opt_in(env, tmp_path):
+    env["use"](reply(GOOD_EXPL))
+    ask(env["c"], at_step(env["c"], "chest_pain", "c6"))
+    assert not (tmp_path / "llm_cache.json").exists()
+

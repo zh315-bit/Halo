@@ -15,6 +15,17 @@ from halo_agent.sos import service as service_mod
 from halo_agent.sos.protocols import PLACEHOLDER, load_all, load_sources, parse_checklist
 from halo_agent.sos.session_log import SessionLog
 
+
+@pytest.fixture(autouse=True)
+def _isolated_llm_cache(tmp_path, monkeypatch):
+    """Never touch data/llm_cache.json from tests."""
+    from halo_agent.shell import cache as cache_mod
+    monkeypatch.setenv("HALO_LLM_CACHE_FILE", str(tmp_path / "llm_cache.json"))
+    cache_mod.reset()
+    yield
+    cache_mod.reset()
+
+
 READING = {   # shape of core.LatestReading (values from QR_DEMO_0276)
     "reading_id": "QR_DEMO_0276", "crew_id": "CREW_01", "timestamp": "2026-11-16T09:05:00Z",
     "heart_rate_bpm": 100.0, "resp_rate_bpm": 20.0, "systolic_bp_mmhg": 189.0, "diastolic_bp_mmhg": 72.0,

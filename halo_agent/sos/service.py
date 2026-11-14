@@ -200,6 +200,7 @@ class SosService:
             # The reviewer `note` is deliberately left out: it is not an instruction.
             return {"step": {"id": st.id, "text": st.text, "ref": st.ref,
                              "sources": [c.sources[k].as_dict() for k in st.sources]},
+                    "reading_id": v.get("reading_id"),
                     "vitals": {k: m.get("value") for k, m in (v.get("metrics") or {}).items()}}
 
     def record_ask(self, session_id: str, question: str, result: dict) -> None:

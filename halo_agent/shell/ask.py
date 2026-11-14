@@ -10,18 +10,15 @@ question brought in (drug names, dose expressions, other new words). See `reject
 
 from __future__ import annotations
 
-import copy
 import hashlib
 import json
 import re
-import threading
-import weakref
-from collections import OrderedDict
 from pathlib import Path
 from typing import Optional
 
 import yaml
 
+from .cache import cacheable, get_cache
 from .llm import LLMClient, call_llm, extract_json
 
 NOT_COVERED = "The checklist doesn't cover this — contact ground."
@@ -29,11 +26,16 @@ OFFLINE_REPLY = "Not covered offline — follow the checklist"
 PLACEHOLDER = "[PLACEHOLDER — not medical guidance]"
 MAX_ANSWER_CHARS = 600
 
+# Bump whenever SYSTEM (or the payload shape) changes: it is part of every cache key.
+PROMPT_VERSION = "ask-v2"
+
 SYSTEM = """You help a crew member understand the CURRENT checklist step during an emergency.
 Rules:
 - Use ONLY the step text and its source titles / reference given to you. Rephrase them in plain words; add nothing new.
 - Never diagnose, never name a disease. Never name any drug or dose, even if the question names one: for medication
   questions, restate what the step says (follow the onboard Medical Checklist as the flight surgeon directs).
+- Never mention any medicine by name in your answer, including any medicine named in the question. When you need to
+  refer to one, say only "any medicine".
 - Never invent a new step or tell them to do anything the step does not say.
 - If the question is not answered by the step text, set "not_covered": true.
 Reply with JSON only: {"answer": "...", "citations": ["<step id>"], "not_covered": false}"""
@@ -43,9 +45,6 @@ _WORD = re.compile(r"[A-Za-z][A-Za-z\-]{4,}")
 _TOKEN = re.compile(r"[A-Za-zµ][A-Za-zµ\-]*")
 GUARD_FILE = Path(__file__).resolve().parents[2] / "config" / "ask_guard.yaml"
 EXPLANATION_LABEL = "AI explanation"
-_MEMO_MAX = 256
-_memos: "weakref.WeakKeyDictionary" = weakref.WeakKeyDictionary()   # one memo per client instance
-_memo_lock = threading.Lock()
 
 
 def _load_guard(path: Path = GUARD_FILE) -> tuple[frozenset, frozenset, tuple]:
@@ -68,9 +67,20 @@ _DOSE_EXPR = re.compile(r"\d+(?:[.,]\d+)?\s*(?:" + "|".join(sorted(map(re.escape
                         + r")\b", re.IGNORECASE)
 
 
-def clear_cache() -> None:
-    with _memo_lock:
-        _memos.clear()
+def clear_cache() -> int:
+    return get_cache().clear()
+
+
+def normalize_question(q: str) -> str:
+    return " ".join((q or "").lower().split())
+
+
+def cache_key(llm, step: dict, question: str, reading_id) -> str:
+    """prompt version + model + step id (+ step text hash) + normalized question + reading_id."""
+    parts = [PROMPT_VERSION, getattr(llm, "model", "") or llm.name, step.get("id") or "",
+             hashlib.sha256((step.get("text") or "").encode()).hexdigest()[:12],
+             normalize_question(question), str(reading_id)]
+    return json.dumps(parts, ensure_ascii=False)
 
 
 def _fixed(answer: str) -> dict:
@@ -124,7 +134,7 @@ def ask(question: str, context: Optional[dict], llm: LLMClient, mode: str) -> di
     Result: {answer, citations, answered_by, explanation}. When the model says the step does not cover the question
     (not_covered) but its restatement passes every guard, the fixed reply is the answer and the restatement is
     attached as `explanation` ({source: "llm", label: "AI explanation", text, citations}). Results that came from a
-    model call are memoised on (model, prompt) so the same question on the same step shows the same thing."""
+    model call are cached persistently (shell/cache.py) so the same question on the same step and reading shows the same thing."""
     if mode == "offline" or not llm.available():
         return _fixed(OFFLINE_REPLY)
     if context is None:
@@ -138,13 +148,12 @@ def ask(question: str, context: Optional[dict], llm: LLMClient, mode: str) -> di
     payload = json.dumps({"step": {"id": step["id"], "text": text, "ref": ref,
                                    "sources": [s.get("title") for s in sources]},
                           "latest_vitals": vitals, "question": question}, ensure_ascii=False, sort_keys=True)
-    # One memo per client instance (production: the single cached AnthropicLLM from get_llm()).
-    key = hashlib.sha256(f"{getattr(llm, 'model', '')}|{payload}".encode()).hexdigest()
-    with _memo_lock:
-        _memo = _memos.setdefault(llm, OrderedDict())
-        if key in _memo:
-            _memo.move_to_end(key)
-            return copy.deepcopy(_memo[key])
+    use_cache = cacheable(llm)
+    key = cache_key(llm, step, question, context.get("reading_id"))
+    if use_cache:
+        hit = get_cache().get("ask", key)
+        if hit is not None:
+            return hit
     raw = call_llm(llm, SYSTEM, payload, mode)
     if raw is None:
         return _fixed(OFFLINE_REPLY)          # not memoised: next ask retries
@@ -165,9 +174,6 @@ def ask(question: str, context: Optional[dict], llm: LLMClient, mode: str) -> di
             out = _fixed(NOT_COVERED)
         out["not_covered"] = bool(data.get("not_covered"))
         out["rejected"] = why
-    with _memo_lock:
-        _memo = _memos.setdefault(llm, OrderedDict())
-        _memo[key] = copy.deepcopy(out)
-        while len(_memo) > _MEMO_MAX:
-            _memo.popitem(last=False)
+    if use_cache:
+        get_cache().put("ask", key, out)
     return out

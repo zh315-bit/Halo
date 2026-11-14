@@ -3,12 +3,23 @@
     set -a && . .env && set +a && HALO_LIVE_LLM=1 uv run --extra llm pytest tests/test_sos_llm_live.py -s
 
 Same question 3 times -> identical not_covered flag, rejection reason and final displayed content.
-(The model takes no temperature; consistency comes from the per-client memo in shell/ask.py and classify.py.)
+(The model takes no temperature; consistency comes from the persistent cache, shell/cache.py.)
 """
 
 import os
 
 import pytest
+
+
+@pytest.fixture(autouse=True)
+def _isolated_llm_cache(tmp_path, monkeypatch):
+    """Never touch data/llm_cache.json from tests."""
+    from halo_agent.shell import cache as cache_mod
+    monkeypatch.setenv("HALO_LLM_CACHE_FILE", str(tmp_path / "llm_cache.json"))
+    cache_mod.reset()
+    yield
+    cache_mod.reset()
+
 
 pytestmark = pytest.mark.skipif(
     os.environ.get("HALO_LIVE_LLM") != "1" or not os.environ.get("HALO_LLM_API_KEY"),
