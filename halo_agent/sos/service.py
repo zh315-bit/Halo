@@ -13,7 +13,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Callable, Optional
 
-from halo_agent.notify import DryRunSender, QueueSender, TwilioSender, alert_mode
+from halo_agent.notify import DryRunSender, QueueSender, TwilioBridgeSender, TwilioSender, alert_mode
 from halo_agent.notify.base import SENDING, SIMULATED, AlertMessage, SendResult, render_body
 from halo_agent.notify.queue import UI_TEXT as QUEUED_UI_TEXT
 
@@ -53,6 +53,7 @@ def _ts(iso: str) -> float:
 
 
 REPORTED_TEXT = "Reported to flight surgeon"
+BRIDGE_QUEUED_TEXT = "Alert bridge unreachable: alert queued and retried automatically. Continue the checklist."
 
 
 def default_score_fn(crew_id: str) -> Optional[dict]:
@@ -82,6 +83,7 @@ class SosService:
         self.log = log or SessionLog()
         self.rules = rules if rules is not None else esc.load_config()
         self.dry_run, self.queue, self.twilio = DryRunSender(), QueueSender(), twilio or TwilioSender()
+        self.bridge = TwilioBridgeSender(self.queue)
         self.sessions: dict[str, Session] = {}
         self.ground_reports: list[dict] = []     # level=report escalations: logged for ground, never texted
         self._ctx: dict[str, dict] = {}          # session_id -> {vitals, score, messages, reasons, logged}
@@ -317,8 +319,7 @@ class SosService:
             ctx["messages"].append(msg)
             s.overlay("escalate", at, "system", reason=group[0], reasons=group if len(group) > 1 else None,
                       message_id=msg.message_id, level="urgent")
-            sender = self.queue if self.mode_fn() == "offline" else (
-                self.twilio if alert_mode() == "live" else self.dry_run)
+            sender = self.queue if self.mode_fn() == "offline" else self._online_sender()
             if sender.blocking:
                 msg.state, msg.sender = SENDING, sender.name
                 jobs.append(lambda m=msg, snd=sender: self._deliver(m, snd))
@@ -351,12 +352,22 @@ class SosService:
         s.overlay("alert_update", self.now(), r.sender, message_id=msg.message_id, delivery=r.state,
                   sid=r.sid, attempts=r.attempts, error=r.error)
 
+    def _online_sender(self):
+        return {"live": self.twilio, "bridge": self.bridge}.get(alert_mode(), self.dry_run)
+
     def _flush_queue(self) -> None:
-        if self.mode_fn() == "offline" or not self.queue.pending():
+        if self.mode_fn() == "offline" or not self.queue.due():
             return
-        online = self.twilio if alert_mode() == "live" else self.dry_run
-        for msg, result in self.queue.flush(online):
-            self._apply(msg, result)
+        online = self._online_sender()
+        if online.blocking:                  # network sender: never stall the request; retry in the background
+            todo = self.queue.take()
+            for m in todo:
+                m.state, m.sender = SENDING, online.name
+            threading.Thread(target=lambda: [self._deliver(m, online) for m in todo], daemon=True,
+                             name="halo-alert-flush").start()
+            return
+        for msg in self.queue.take():
+            self._apply(msg, online.send(msg))
             self._persist(self.sessions[msg.session_id])
 
     def _persist(self, s: Session) -> None:
@@ -438,7 +449,9 @@ class SosService:
                 "sms_status": sms_status,
                 "call_status": "not_implemented",
                 "acknowledged_at": s.acknowledged_at, "ack_by": s.ack_by,
-                "ui_message": UI_TEXT["acknowledged"] if s.acknowledged_at else UI_TEXT.get(sms_status),
+                "ui_message": UI_TEXT["acknowledged"] if s.acknowledged_at else (
+                    BRIDGE_QUEUED_TEXT if (last and last.sender == "twilio_bridge" and last.state == "queued_offline")
+                    else UI_TEXT.get(sms_status)),
                 "messages": [{"message_id": m.message_id, "reason": m.reason, "reasons": list(m.reasons),
                               "level": "urgent", "channel": m.channel,
                               "state": m.state, "sender": m.sender, "sid": m.sid, "attempts": m.attempts,

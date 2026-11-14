@@ -7,6 +7,7 @@ next request made in online mode).
 from __future__ import annotations
 
 import threading
+import time
 
 from .base import QUEUED_OFFLINE, AlertMessage, AlertSender, SendResult
 
@@ -20,6 +21,20 @@ class QueueSender:
     def __init__(self) -> None:
         self._pending: list[AlertMessage] = []
         self._lock = threading.Lock()
+        self._not_before = 0.0          # monotonic time before which a flush is pointless (bridge retry back-off)
+
+    def defer(self, seconds: float) -> None:
+        with self._lock:
+            self._not_before = max(self._not_before, time.monotonic() + seconds)
+
+    def due(self) -> bool:
+        with self._lock:
+            return bool(self._pending) and time.monotonic() >= self._not_before
+
+    def take(self) -> list[AlertMessage]:
+        with self._lock:
+            todo, self._pending = self._pending, []
+            return todo
 
     def send(self, msg: AlertMessage) -> SendResult:
         with self._lock:

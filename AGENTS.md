@@ -559,7 +559,15 @@ time, session id) — no medical text.
   `TWILIO_AUTH_TOKEN`, `TWILIO_FROM_NUMBER`, `MISSION_SUPPORT_NUMBER`. One automatic retry; still failing →
   `failed`, UI "Alert not delivered. Continue the checklist.", checklist continues. Trial accounts can only text
   verified numbers.
-- **Phase 3:** voice call (TwiML), `ACK <session>` SMS replies with signature check, status callbacks.
+- Online, `ALERT_MODE=bridge` → `TwilioBridgeSender` (`notify/bridge.py`): `POST $TWILIO_BRIDGE_URL/alerts/send`
+  (default `http://127.0.0.1:8000`) with `{"level": "act", "message"}` to the team bridge
+  (github.com/Dhruvachaitanya13/halo `twilio/halo_twilio.py`), which owns recipients, SMS and calls. Sent when the
+  bridge reports ≥ 1 SMS; otherwise → `QueueSender` (`queued_offline`, UI "Alert bridge unreachable…"), retried in a
+  background thread at most every 30 s. Report level never sent.
+- Inbound (crew texts / calls via the bridge): `halo_agent/integrations/twilio_bridge.py` provides the bridge's
+  `ask_agent(text, mode, sender)` and `current_status()` (stdlib only, HTTP to `HALO_AGENT_URL`, 5 s timeout, ≤ 300
+  chars, never raises). Details: docs/INTEGRATION.md "Twilio: how to connect".
+- **Phase 3:** voice call (TwiML) from HALO's own Twilio SDK sender, `ACK <session>` SMS replies, status callbacks.
 
 ### 8.5 Proactive nudge (`sos/nudge.py`, `config/nudges.yaml`)
 Suggests checking on a crewmate when their score turns `alert`. Deterministic, offline, no LLM, **no new medical

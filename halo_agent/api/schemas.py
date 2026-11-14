@@ -243,7 +243,7 @@ class AlertMessageOut(_Strict):                                         # sos-v0
     level: Literal["urgent"] = "urgent"                 # sos-v2: report-level escalations are never messages
     channel: str
     state: DeliveryState
-    sender: Optional[Literal["dry_run", "queue", "twilio"]]
+    sender: Optional[Literal["dry_run", "queue", "twilio", "twilio_bridge"]]
     sid: Optional[str]
     attempts: int
     error: Optional[str]
@@ -252,7 +252,7 @@ class AlertMessageOut(_Strict):                                         # sos-v0
 
 
 class SosAlert(_Strict):                                                # sos-v0 addition
-    mode: Literal["dry_run", "live", "offline_queue"]
+    mode: Literal["dry_run", "live", "bridge", "offline_queue"]
     sms_status: Literal["not_sent", "sending", "dry_run", "sent", "queued_offline", "failed"]
     call_status: Literal["not_implemented"]          # voice call is Phase 3
     acknowledged_at: Optional[str]
