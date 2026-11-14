@@ -538,8 +538,14 @@ content**: suggestions are derived from the checklists' `red_flags`.
 ## 10. M6 + shell — knowledge and LLM
 
 - `LLMClient` (`shell/llm.py`): `available() -> bool`, `complete(system, user, timeout_s) -> str`. Provider and
-  key come from env (`HALO_LLM_PROVIDER`, `HALO_LLM_API_KEY`, `HALO_LLM_MODEL`) ⚑; until an adapter exists every
-  value maps to `NullLLM`. Tests use `FakeLLM`. **All calls go through `call_llm()`**, which returns the fallback
+  key come from env: `HALO_LLM_PROVIDER=anthropic`, `HALO_LLM_API_KEY`, `HALO_LLM_MODEL` (default `claude-opus-5-5`),
+  `HALO_LLM_EFFORT` (default `low`). Decided 2026-11-14: **Anthropic, Claude Opus 5.5** (closes ⚑ Q8 provider/model;
+  key and venue internet still open). `AnthropicLLM` uses the official `anthropic` SDK (optional extra `llm`:
+  `uv sync --extra llm`) on the beta Messages endpoint: no `thinking` parameter (always on for Opus 5.5), explicit
+  `output_config.effort`, server-side refusal fallbacks (`fallbacks: "default"`, beta `server-side-fallback-2026-07-01`),
+  SDK `max_retries=0`. `stop_reason` `refusal` or `max_tokens` → treated as an error → deterministic fallback. Any
+  missing piece (provider, key, SDK, valid effort) → `NullLLM`. The SDK client is built lazily on the first online
+  call. Smoke test: `uv run --env-file .env python -m halo_agent.shell.llm`. Tests use `FakeLLM`. **All calls go through `call_llm()`**, which returns the fallback
   before touching the client when offline or unavailable; timeout `HALO_LLM_TIMEOUT_S` (≤ 8 s); errors fall back.
 - Orchestration: **LangGraph** router → `sos` / `ask` / `report` subgraphs. In offline mode the same graph
   runs, with LLM nodes swapped for rule/template nodes.
