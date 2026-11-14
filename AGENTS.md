@@ -615,10 +615,11 @@ camera_scan`, fed by main's `POST /api/v1/scan`). Everything live is labelled **
   (`reading_id, timestamp, data_origin, measurement_origin, first_used_at`) split into live camera readings (+ the scan
   summaries used) and replayed/simulated readings ("Replayed demo or simulated data (not a live measurement)").
   The two are never merged; a block is `null` when empty.
-- **Smoke:** `uv run python scripts/smoke_sos.py` — `demo` (CREW_01) and `scan` (POST the fixture as `LIVE_01` →
-  SOS → `camera_scan`, missing + note, `scan_context`, `live_data`). `/api/v1/scan` exists on main (2026-11-14),
-  so `scan` must PASS. Request body: the scan record plus `crew_id` (`scan_body()`); `/scan` also accepts
-  `{crew_id, record}`. `core.latest_scan` is provided by main.
+- **Smoke:** `uv run python scripts/smoke_sos.py [--url URL] [--only demo|scan|sos_event] [--crew ID]` — `demo`
+  (CREW_01), `scan` (POST the fixture to `/api/v1/scan` as `{crew_id, record}` → SOS → `camera_scan`, missing + note,
+  `scan_context`, `live_data`; must PASS now that main provides `/scan` and `core.latest_scan`; with `--url` the crew
+  defaults to `LIVE_SMOKE` because `/scan` persists), and `sos_event` (replay `SIMULATED_sos_event.csv` → nudge →
+  accept → breathing checklist to END; nudges are one per crew per 5 min, so on a reused server wait between runs).
 
 ## 9. M5 — Daily report
 

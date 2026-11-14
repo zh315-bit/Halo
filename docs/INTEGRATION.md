@@ -213,3 +213,21 @@ Checked end to end (2026-11-14): a copy of `halo_twilio.py` with the import abov
 to `/twilio/sms` and `/twilio/voice`, and HALO alerts posted to `/alerts/send` (503 without Twilio credentials →
 queued as designed).
 
+## SOS event scene (for `config/demo.yaml`, owned by main)
+
+`data/SIMULATED_sos_event.csv` (from `scripts/make_sos_scenario.py`, SIMULATED, crew `SIM_CREW_SOS`) is ready.
+Add this scene to `config/demo.yaml` (and drop the "There is no SOS-event scene yet" comment there):
+
+```yaml
+  sos_event:
+    description: "SIMULATED acute event crew SIM_CREW_SOS: calm 2-day baseline, then SpO2 drops to 86 % with HR rising -> spo2_low red flag, alert, nudge to the breathing checklist."
+    replay: {file: SIMULATED_sos_event.csv, speed: 3600}
+    mode: online
+```
+
+At 3600× the whole file takes about 57 s: about 56 s of baseline, then the event (first alert, `spo2_low`, at
+day 3 08:05). The nudge for `SIM_CREW_SOS` appears as soon as that reading is scored (Engine hook → `on_nudge`):
+`GET /api/v1/crew/SIM_CREW_SOS/nudges`, then `POST /api/v1/nudges/{id}/accept {"symptom": "breathing_difficulty"}`.
+For an instant version use `load: [SIMULATED_sos_event.csv]` instead of `replay`. Nudges are limited to one per
+crew per 5 minutes, so run `reset` (or wait) before replaying the scene again in the same server.
+
