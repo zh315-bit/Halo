@@ -194,6 +194,8 @@ The team draft's fields are kept unchanged. `reading_id`, `indicators` and `reas
   consumers must check `confidence` before showing a green state.
 - Python entry point for other modules: `from halo_agent.core import score_latest` →
   `score_latest(crew_id) -> ScoreResult | None` (None until that crew has been scored).
+- Push hook: `core.get_engine().add_listener(fn) -> remove()`. `fn(score)` runs after every `Engine.update`,
+  outside the Engine lock; a listener that raises is logged and never changes the returned score.
 
 ### 6.4 `SosSession`
 The Phase 0 fields are unchanged; everything below `disclaimer` is a sos-v0 addition. `score` is now nullable.

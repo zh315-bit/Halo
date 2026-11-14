@@ -246,3 +246,30 @@ def test_latest_reading_matches_score_latest():
         assert eng.latest_reading("SIM_FIXTURE", now=seq[-1].timestamp + td(minutes=10)).age_seconds == 600
     finally:
         core.set_engine(None)
+
+
+def test_engine_listener():
+    eng = Engine(CFG)
+    seen, calls = [], []
+
+    def good(score):
+        seen.append((score.reading_id, eng.latest(score.crew_id).reading_id))   # may call back into the Engine
+
+    def bad(score):
+        calls.append(score.reading_id)
+        raise RuntimeError("listener bug")
+
+    remove = eng.add_listener(good)
+    eng.add_listener(bad)
+    out = [eng.update(r) for r in history(3)]
+    assert [r.reading_id for r in out] == ["SIM_0000", "SIM_0001", "SIM_0002"]       # bad listener changes nothing
+    assert seen == [(r.reading_id, r.reading_id) for r in out] and len(calls) == 3
+    remove()
+    eng.update(sim(3))
+    assert len(seen) == 3 and len(calls) == 4
+    eng.reset()                                                                     # state reset keeps listeners
+    eng.update(sim(4))
+    assert len(calls) == 5
+    # listeners never change the result: identical to batch scoring
+    plain = Engine(CFG)
+    assert [plain.update(r).to_dict() for r in history(5)] == [r.to_dict() for r in score(history(5), CFG)]
