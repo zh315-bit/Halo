@@ -336,6 +336,7 @@ class AskResponse(_Strict):
 class Sleep(_Strict):
     in_bed_minutes: Optional[float]
     vs_baseline: Optional[float]
+    in_bed_hr_median: Optional[float] = None      # M5: median HR over the night's in-bed readings
 
 
 class MorningActivity(_Strict):
@@ -352,6 +353,13 @@ class VitalsTrendItem(_Strict):
 class EnvironmentContext(_Strict):
     label: str
     is_personal_dose: Literal[False]
+    # M5 additions (optional; AGENTS.md §6.5). Environment reference only, never a crew status input.
+    reference_date: Optional[str] = None          # date in the historical file mapped to this mission day
+    dose_day_ugy: Optional[float] = None          # observed absorbed dose accumulated that day (µGy)
+    level: Optional[Status] = None                # halo_alert_rules daily level, watch/act -> caution/alert
+    threshold_source: Optional[str] = None
+    source: Optional[str] = None
+    prediction: Optional[str] = None              # "Model not trained" (no radiation model exists)
 
 
 class DailyReport(_Strict):
@@ -364,6 +372,7 @@ class DailyReport(_Strict):
     environment_context: EnvironmentContext
     watch_items: list[str]
     recommendations: list[str]
+    recommendations_source: Literal["team_policy"] = "team_policy"   # fixed non-medical sentences (report.yaml)
     summary_text: str
     summary_generated_by: Literal["template", "llm"]
     data_sources: list[str]

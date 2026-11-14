@@ -75,11 +75,17 @@ def test_ask_contract(client):
     assert a.session_id is None
 
 
-def test_daily_report(client):
-    d = _ok(client.get("/api/v1/crew/CREW_01/daily-report", params={"date": "2026-11-16"}), S.DailyReport)
-    assert d.date == "2026-11-16" and d.environment_context.is_personal_dose is False
-    assert d.disclaimer == DISCLAIMER
-    assert client.get("/api/v1/crew/CREW_01/daily-report", params={"date": "tomorrow"}).status_code == 422
+def test_daily_report_needs_data(client):
+    # Real since M5 (tests/test_daily_report.py). Without any reading for the crew it is a 404, not a fake report.
+    from halo_agent import core
+    from halo_agent.config_loader import load_scoring_config
+    old = core.get_engine()
+    core.set_engine(core.Engine(load_scoring_config()))
+    try:
+        assert client.get("/api/v1/crew/NOBODY/daily-report").status_code == 404
+        assert client.get("/api/v1/crew/CREW_01/daily-report", params={"date": "tomorrow"}).status_code == 422
+    finally:
+        core.set_engine(old)
 
 
 def test_offline_toggle_propagates(client):

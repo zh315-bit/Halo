@@ -1,0 +1,27 @@
+# M5 daily report (AGENTS.md §9). All values team_derived unless marked.
+night_window:            # the "previous night" for report date D: [D-1 18:00, D 12:00) mission time
+  start_hour_prev_day: 18
+  end_hour: 12
+  min_coverage: 0.8      # readings must cover >= 80 % of the window (up to the cutoff), else in_bed_minutes = null
+min_nights_for_baseline: 3        # sleep vs_baseline needs this many earlier nights (else null)
+min_mornings_for_baseline: 3      # morning activity vs_baseline_pct needs this many earlier results
+morning_window_hours: 4           # team_derived: duty_status = worst debounced status of RESTING readings in
+                                  # [cutoff - 4 h, cutoff] (cutoff = morning activity time, else night end)
+duty_consecutive: 2               # team_derived: within that window a metric's caution/alert counts only if
+                                  # reached on this many consecutive NEW measurements (red flags count at once)
+duty_status:                      # §9.4 default mapping (team_derived)
+  normal: go
+  caution: caution
+  alert: rest
+  no_data: caution                # no resting reading in the morning window: never "go" on missing data (§3.5)
+radiation_reference:              # environment only; never changes a crew member's status (§5)
+  file: data/radiation_5min.csv
+  label: "Historical ISS radiation - May 2024"
+  source: "NASA_RadLab_DosTel1_ISS_Columbus (historical, not personal dose)"
+  first_date: "2024-05-01"        # mission day 1 -> this date, day 2 -> next date, ... (demo mapping)
+  thresholds: config/thresholds/radiation_thresholds.json   # halo_alert_rules, metric observed_dose_accumulated_day_ugy
+recommendations:                  # source: team_policy. Fixed sentences, no medical content (AGENTS.md §3.1)
+  source: team_policy
+  unfavourable_trend: "Discuss the {metric} trend with the flight surgeon at the next contact."
+  missing_data: "Take a fresh vitals reading."
+  rest: "Follow the flight surgeon’s guidance before resuming duties."

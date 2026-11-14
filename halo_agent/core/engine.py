@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import threading
 import time
+from collections import deque
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timedelta
 from typing import Optional
@@ -34,10 +35,12 @@ class _CrewState:
     latest: Optional[ScoreResult] = None
     last_reading: Optional[VitalsReading] = None
     received_wall: float = 0.0                       # time.monotonic() when last_reading was processed
+    log: deque = field(default_factory=lambda: deque(maxlen=Engine.HISTORY_MAX))   # (reading, result)
 
 
 class Engine:
     name = "rules-v0"
+    HISTORY_MAX = 6000            # (reading, result) pairs kept per crew for the daily report (~20 days at 5 min)
 
     def __init__(self, cfg: ScoringConfig, wall=time.monotonic):
         self.cfg = cfg
@@ -77,6 +80,7 @@ class Engine:
                 per[m] = (ms.last_eval, (r.timestamp - ms.last_new_ts).total_seconds() / 60.0)
             st.latest = assemble(r, per, self.cfg)
             st.last_reading, st.received_wall = r, self._wall()
+            st.log.append((r, st.latest))
             return st.latest
 
     def reset(self, crew_id: Optional[str] = None) -> None:
@@ -108,6 +112,16 @@ class Engine:
                     ages[m] = round((now - ms.last_new_ts).total_seconds(), 1)
             return LatestReading(**asdict(r), measured_at=measured, metric_age_seconds=ages,
                                  age_seconds=round((now - r.timestamp).total_seconds(), 1))
+
+    def history(self, crew_id: str) -> list[tuple[VitalsReading, ScoreResult]]:
+        """(reading, score) pairs this Engine produced for the crew, oldest first (bounded)."""
+        with self._lock:
+            st = self._crews.get(crew_id)
+            return list(st.log) if st else []
+
+    def crews(self) -> list[str]:
+        with self._lock:
+            return list(self._crews)
 
     def latest(self, crew_id: str) -> Optional[ScoreResult]:
         st = self._crews.get(crew_id)
