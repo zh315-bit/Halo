@@ -190,9 +190,10 @@ the symptom picker, a fixed reply and the template text when offline.
 
 - Radiation prediction model: none exists, the UI shows "Model not trained".
 - Bone density in scoring (Phase 4), ML scoring model, face-scan vital-sign algorithms.
-- Daily report LLM rewrite (the shared `LLMClient` now exists; the rewrite itself is not built). The template report is live:
-  `GET /api/v1/crew/{crew_id}/daily-report?date=` (sleep is estimated from `in_bed` periods; there are no
-  sleep stages in the data).
+- Daily report LLM rewrite is built (`shell/rewrite.py`): online, the model rewrites only `summary_text` from the
+  structured fields, and the paragraph is shown (`summary_generated_by: "llm"`) only if every number in it is in the
+  fields, the duty status is kept and no medicine or dose appears. Otherwise, and always offline, the template text
+  stays. It was tested with a scripted fake model only, not yet against the live API.
 
 ## AI tools used during development
 

@@ -12,6 +12,10 @@ from .. import core
 from ..config_loader import REPO_ROOT, load_report_config, load_scoring_config
 from ..report.daily import ReportConfig, build_daily_report, build_live_report, mission_day_of
 from ..report.environment import load_reference
+from ..shell.llm import LLMClient
+from ..shell.llm import get_llm as _env_llm
+from ..shell.rewrite import rewrite_report
+from .routes_admin import current_mode
 from .schemas import DailyReport, MorningActivityAccepted, MorningActivityRequest
 
 router = APIRouter(prefix="/api/v1", tags=["report"])
@@ -23,6 +27,19 @@ _mornings: dict[tuple[str, _date], dict] = {}
 
 def reset_mornings() -> None:
     _mornings.clear()
+
+
+_llm: Optional[LLMClient] = None
+
+
+def get_llm() -> LLMClient:
+    """From env (HALO_LLM_*); NullLLM when not configured. Tests inject FakeLLM with set_llm()."""
+    return _llm if _llm is not None else _env_llm()
+
+
+def set_llm(llm: Optional[LLMClient]) -> None:
+    global _llm
+    _llm = llm
 
 
 def _date_or_422(d: str) -> _date:
@@ -75,8 +92,11 @@ def daily_report(crew_id: str, date: Optional[str] = Query(None, description="YY
         raise HTTPException(404, f"no readings for {crew_id} yet (start with HALO_WARMUP_CSV or /admin/replay)")
     d = asked or history[-1][0].timestamp.astimezone(timezone.utc).date()
     if eng.is_live(crew_id):                       # real camera scans: own report shape, own baseline only
-        return build_live_report(crew_id, d, history, load_scoring_config(),
-                                 ReportConfig.from_dict(load_report_config()), _environment(d))
-    mornings = {k[1]: v for k, v in _mornings.items() if k[0] == crew_id}
-    return build_daily_report(crew_id, d, history, load_scoring_config(),
-                              ReportConfig.from_dict(load_report_config()), _environment(d), mornings)
+        rep = build_live_report(crew_id, d, history, load_scoring_config(),
+                                ReportConfig.from_dict(load_report_config()), _environment(d))
+    else:
+        mornings = {k[1]: v for k, v in _mornings.items() if k[0] == crew_id}
+        rep = build_daily_report(crew_id, d, history, load_scoring_config(),
+                                 ReportConfig.from_dict(load_report_config()), _environment(d), mornings)
+    # §9.5: template first; online, the shell may rewrite summary_text (validated, else the template stays)
+    return rewrite_report(rep, get_llm(), current_mode())

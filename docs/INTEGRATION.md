@@ -22,7 +22,7 @@ HALO_WARMUP_CSV=qr_scan_demo_clean.csv ALERT_MODE=dry_run uv run uvicorn halo_ag
 | Crew list for the switcher (synthetic vs live) | `GET /api/v1/crews` |
 | Send a camera scan | `POST /api/v1/scan` (fallback: `POST /api/v1/scan/upload`) |
 | Score a window of readings (stateless) | `POST /api/v1/score` |
-| Daily report | `GET /api/v1/crew/{crew_id}/daily-report?date=YYYY-MM-DD` |
+| Daily report | `GET /api/v1/crew/{crew_id}/daily-report?date=YYYY-MM-DD` (`summary_generated_by`: `llm` when online and the rewritten paragraph passed every check, else `template`) |
 | Morning activity (synthetic crews) | `POST /api/v1/activity/morning` |
 | Crew SOS | `GET /api/v1/sos/problem-types`, `POST /api/v1/sos`, `POST /api/v1/sos/{id}/step`, `…/classify`, `…/confirm`, `…/ack`, `…/resolve`, `GET /api/v1/sos/{id}` |
 | Ask about the current checklist step | `POST /api/v1/agent/ask` |
