@@ -50,3 +50,38 @@ def summary_text(rep: dict, level: Optional[str], n_morning: int, window_h: floa
                      f"{env.get('level') or 'level unknown'}.")
     parts.append(rep["disclaimer"])
     return " ".join(parts)
+
+
+def live_summary_text(rep: dict, level: Optional[str], n_scans: int, consecutive: int) -> str:
+    """Summary for a live camera-scan crew. Only numbers that are in the structured fields."""
+    parts = [f"Duty status: {rep['duty_status'].upper()}."]
+    sl = rep["sleep"]
+    if sl["self_report_hours"] is None:
+        parts.append("No self-reported sleep for this date.")
+    else:
+        s = f"Self-reported sleep: {_n(sl['self_report_hours'])} h"
+        if sl["self_report_vs_baseline_hours"] is not None:
+            s += f" ({_n(sl['self_report_vs_baseline_hours'])} h vs your usual)"
+        parts.append(s + ".")
+    tests = [t for t in rep["morning_activity"]["tests"] if t["value"] is not None]
+    if tests:
+        bits = []
+        for t in tests:
+            b = f"{t['metric']} {_n(t['value'])}"
+            if t["vs_baseline_pct"] is not None:
+                b += f" ({_n(t['vs_baseline_pct'])} % vs your earlier scans)"
+            bits.append(b)
+        parts.append("Scan tests: " + ", ".join(bits) + ".")
+    if level is None:
+        parts.append("No vitals from the camera scan could be compared with your personal baseline yet.")
+    else:
+        parts.append(f"Camera-scan vitals over your last {n_scans} scan(s): {level} (a level counts after "
+                     f"{consecutive} scans in a row; red flags count at once).")
+    v = rep["scan_verdict"]
+    if v and v["verdict"] is not None:
+        s = f"{v['label']} (from the scan page, not HALO): {v['verdict']}"
+        if v["readiness_score"] is not None:
+            s += f", readiness {_n(v['readiness_score'])}"
+        parts.append(s + ".")
+    parts.append(rep["disclaimer"])
+    return " ".join(parts)

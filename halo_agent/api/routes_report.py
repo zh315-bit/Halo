@@ -10,7 +10,7 @@ from fastapi import APIRouter, HTTPException, Query
 
 from .. import core
 from ..config_loader import REPO_ROOT, load_report_config, load_scoring_config
-from ..report.daily import ReportConfig, build_daily_report, mission_day_of
+from ..report.daily import ReportConfig, build_daily_report, build_live_report, mission_day_of
 from ..report.environment import load_reference
 from .schemas import DailyReport, MorningActivityAccepted, MorningActivityRequest
 
@@ -73,7 +73,10 @@ def daily_report(crew_id: str, date: Optional[str] = Query(None, description="YY
     history = eng.history(crew_id) if eng else []
     if not history:
         raise HTTPException(404, f"no readings for {crew_id} yet (start with HALO_WARMUP_CSV or /admin/replay)")
-    d = asked or history[-1][0].timestamp.date()
+    d = asked or history[-1][0].timestamp.astimezone(timezone.utc).date()
+    if eng.is_live(crew_id):                       # real camera scans: own report shape, own baseline only
+        return build_live_report(crew_id, d, history, load_scoring_config(),
+                                 ReportConfig.from_dict(load_report_config()), _environment(d))
     mornings = {k[1]: v for k, v in _mornings.items() if k[0] == crew_id}
     return build_daily_report(crew_id, d, history, load_scoring_config(),
                               ReportConfig.from_dict(load_report_config()), _environment(d), mornings)

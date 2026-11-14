@@ -37,6 +37,8 @@ class ScoringConfig:
     mission_start: datetime
     baseline_scenarios: tuple[str, ...]
     min_points: int
+    min_points_by_origin: dict    # data_origin -> min_points override (live camera scans: 3)
+    live_data_origins: frozenset  # data_origins that are real measurements ("live" crews)
     mad_scale: float
     no_pool_metrics: frozenset
     mad_floor: dict
@@ -58,6 +60,12 @@ class ScoringConfig:
     data_origin: dict
     metric_display: dict
     red_flags: tuple[RedFlag, ...]
+
+    def min_points_for(self, data_origin: str) -> int:
+        return self.min_points_by_origin.get(data_origin, self.min_points)
+
+    def is_live(self, data_origin: str) -> bool:
+        return data_origin in self.live_data_origins
 
     @classmethod
     def from_dicts(cls, scoring: dict, red_flags: dict) -> "ScoringConfig":
@@ -88,6 +96,8 @@ class ScoringConfig:
             mission_start=datetime.fromisoformat(scoring["mission_start"].replace("Z", "+00:00")),
             baseline_scenarios=tuple(scoring["baseline_scenarios"]),
             min_points=int(b["min_points"]),
+            min_points_by_origin={k: int(v) for k, v in (b.get("min_points_by_origin") or {}).items()},
+            live_data_origins=frozenset(scoring.get("live_data_origins") or ()),
             mad_scale=float(b["mad_scale"]),
             no_pool_metrics=frozenset(b.get("no_pool_metrics") or ()),
             mad_floor={k: float(v) for k, v in b["mad_floor"].items()},

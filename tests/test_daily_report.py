@@ -128,15 +128,15 @@ def test_summary_has_no_diagnosis_words(feed):
 def test_drift_duty_by_day(feed):
     c = feed("SIMULATED_drift_7d.csv")
     duty = [get(c, "SIM_CREW_DRIFT", f"2026-11-{15 + k}").duty_status for k in range(7)]
-    assert duty[:3] == ["go", "go", "go"]                       # baseline days + first drift day
+    assert duty[:3] == ["ready", "ready", "ready"]                       # baseline days + first drift day
     assert all(d in ("caution", "rest") for d in duty[5:])      # days 6-7
-    assert duty == ["go", "go", "go", "caution", "rest", "rest", "rest"]
+    assert duty == ["ready", "ready", "ready", "caution", "rest", "rest", "rest"]
 
 
 def test_go_day_has_no_watch_items_or_recommendations(feed):
     c = feed("SIMULATED_drift_7d.csv")
     rep = get(c, "SIM_CREW_DRIFT", "2026-11-16")
-    assert rep.duty_status == "go" and rep.watch_items == [] and rep.recommendations == []
+    assert rep.duty_status == "ready" and rep.watch_items == [] and rep.recommendations == []
 
 
 def test_recommendation_templates(feed):

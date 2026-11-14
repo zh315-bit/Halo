@@ -8,6 +8,10 @@ baseline:
   # team_derived: 3 points is not a baseline. < 12 in the activity group -> pooled fallback (partial);
   # < 12 pooled -> insufficient (no z band is applied; red flags still run).
   min_points: 12
+  # team_derived: live camera crews scan about once a day, so 12 points would take 12 days. Their own
+  # baseline needs 3 scans; below that baseline_quality = insufficient ("Baseline building (n/3)"), red flags still run.
+  min_points_by_origin:
+    camera_scan: 3
   mad_scale: 1.4826      # MAD -> SD for normal data (standard constant)
   # team_derived: metrics whose level depends strongly on activity never use the pooled fallback
   # (active HR ~98 vs an in-bed-dominated pool ~60 gave false alerts). Too few points -> insufficient.
@@ -66,6 +70,11 @@ data_origin:                 # measurement_origin -> data_origin. Unknown origin
   master_csv_playback_not_camera: demo_playback
   camera: camera
   SIMULATED: simulated
+  camera_scan: camera_scan   # real measurement from the team's scan page (POST /api/v1/scan)
+
+# Real measurements ("live" crews). A crew never mixes live and synthetic readings, so a real scan is never
+# compared with a demo/simulated baseline (e.g. CREW_01).
+live_data_origins: [camera_scan]
 
 metrics:                     # display only (reason text)
   heart_rate_bpm: {label: heart rate, unit: bpm}

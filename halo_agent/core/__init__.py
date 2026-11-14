@@ -12,9 +12,10 @@ from typing import Optional
 from .csv_source import reading_from_csv_row, reading_to_wire
 from .engine import Engine
 from .models import LatestReading, ScoreResult, VitalsReading
+from .scan_source import ScanConfig, reading_from_scan
 
 __all__ = ["Engine", "LatestReading", "ScoreResult", "VitalsReading", "get_engine", "latest_reading",
-           "reading_from_csv_row", "reading_to_wire", "score_latest", "set_engine"]
+           "ScanConfig", "reading_from_csv_row", "reading_from_scan", "reading_to_wire", "score_latest", "set_engine"]
 
 _engine: Optional[Engine] = None
 

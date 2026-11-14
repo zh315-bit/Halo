@@ -97,6 +97,23 @@ Judging criteria that drive design:
 - 42 rows, crew `SIM-A …` / `SIM-B …`, with a `halo_status` column. Not in the agent design doc → **lowest
   priority** (Phase 4). If used: config maps `CREW_01 → SIM-A`, and our status must agree with `halo_status` on all 42 rows.
 
+### Camera scan records (live crews, added 2026-11-14)
+- Real measurements from the team's scan page (repo `Dhruvachaitanya13/Halo`, table `scans` in
+  `scan/supabase_schema.sql`); sample `tests/fixtures/scan_record_sample.json` (real download). One record per scan,
+  about one scan a day. Ingested with `POST /api/v1/scan` (or `/scan/upload`) into a **live crew** (default
+  `live_crew_id: LIVE_01`, `config/scan.yaml`).
+- Mapping (`core.reading_from_scan(record, crew_id, scan_cfg, scoring_cfg)`): `session_id → reading_id`,
+  `created_at → timestamp`, `heart_bpm → heart_rate_bpm` only if `heart_quality ≥ 0.35` (`team_derived`; below or
+  missing → missing, the reason in `scan_context.excluded`), `breathing_brpm → resp_rate_bpm`, `blink_rate_per_min`
+  kept (never scored), `activity = resting`, `measurement_origin = data_origin = camera_scan`,
+  `display_label = "Live camera measurement (experimental)"`. **SpO₂, BP and temperature are missing** (the camera
+  does not measure them), never normal. Both new-reading flags are set: every value in a scan is a new measurement.
+- Test scores (reaction, go/no-go, memory, docking), `sleep_hours`, `self_alertness`, `self_mood`, the page's own
+  `verdict`, `readiness_score` and `flags` are kept verbatim in `scan_context`; they are **never scored**.
+- **Separation:** a crew is either live (`live_data_origins: [camera_scan]`) or synthetic; `Engine.update` and
+  `score()` raise on a mix (API → 409), so a scan is never scored against CREW_01's baseline. `/admin/replay`
+  `reset` clears only the crews in the replayed file.
+
 ### Not available
 Emergency scenarios, sleep stages, mood and cabin CO₂ are not in the data. Sleep is **estimated from
 `activity = in_bed` periods**. The morning activity is undefined ⚑.
@@ -122,9 +139,14 @@ Severity is `0–3`. External level names `watch` / `act` (threshold JSONs) map 
 | **POST /api/v1/activity/morning** | morning activity result for the daily report. Body `{crew_id, date?, completed_at?, completion_seconds?}` → **202** `{"accepted": true, "report_date": "YYYY-MM-DD"}`; stored in memory and used by the report (the activity itself is still ⚑ Q6) | **Chris** |
 | **GET /api/v1/crew/{crew_id}/daily-report?date=** | daily report | **Chris** |
 | **POST /api/v1/admin/mode** | toggle online/offline (demo) | **Chris** |
-| **POST / GET / DELETE /api/v1/admin/replay** | demo feed until M1: POST `{file, speed=60, reset=true}` → **202** `ReplayStatus` (feeds a `data/*.csv` into the live Engine at `speed`× real time via `Engine.update`; 409 if one is running; only files inside `data/`); GET = progress; DELETE = stop. Startup warm-up: env `HALO_WARMUP_CSV=<file in data/>` | **Chris** |
+| **POST / GET / DELETE /api/v1/admin/replay** | demo feed until M1: POST `{file, speed=60, reset=true}` → **202** `ReplayStatus` (feeds a `data/*.csv` into the live Engine at `speed`× real time via `Engine.update`; 409 if one is running; only files inside `data/`; `reset` clears only the crews in that file); GET = progress; DELETE = stop. Startup warm-up: env `HALO_WARMUP_CSV=<file in data/>` | **Chris** |
+| **POST /api/v1/scan** | camera scan ingest: `{crew_id?, record}` (crew_id default `live_crew_id`) → `{accepted, duplicate, crew_id, reading_id, reading: VitalsReading, score: ScoreResult}`. Same `session_id` again → `duplicate: true`, nothing re-scored; older than the crew's last reading or a synthetic crew_id → 409; bad record → 422 | **Chris** |
+| **POST /api/v1/scan/upload** | fallback: multipart `file` (a scan JSON: one record, `{crew_id, record}` or a list) + optional form `crew_id` → `{accepted: n, results: [same as /scan]}` (list ingested oldest first; > 2 MB → 413) | **Chris** |
+| **GET /api/v1/crews** | `{crews: [{crew_id, source: synthetic\|live, data_origin, readings, latest_reading_id, latest_as_of, latest_status, display_label, baseline_building}]}`; the configured live crew is always listed (0 readings until its first scan) | **Chris** |
 
 `/classify` is an addition to the design doc: it keeps classification separate from session start.
+CORS (`config/scan.yaml`): `https://dhruvachaitanya13.github.io` and any `localhost` / `127.0.0.1` port; other origins
+get no CORS headers.
 All of Chris's endpoints must first exist as **stubs returning fixed JSON** (Phase 0).
 
 ### 6.2 `VitalsReading`
@@ -145,6 +167,9 @@ All of Chris's endpoints must first exist as **stubs returning fixed JSON** (Pha
 }
 ```
 `new_reading` is derived from `bp_new_reading` / `temp_new_reading` and is used by M2.
+`scan_context` (optional, `null` except for camera scans): the scan page's test scores, self-report, `verdict`,
+`readiness_score`, `flags`, plus `source: "scan_app"`, `scan_session_id`, `app_version`, `heart_quality` and `excluded`
+(vital → why it was dropped). Never scored.
 
 ### 6.3 `ScoreResult`
 The team draft's fields are kept unchanged. `reading_id`, `indicators` and `reasons[].status/source/rule_id/text` are additions.
@@ -175,6 +200,10 @@ The team draft's fields are kept unchanged. `reading_id`, `indicators` and `reas
 - `deviation_mad` = robust z = `(value − median) / sigma`, with `sigma = 1.4826 × max(MAD, floor)`.
 - `baseline_quality` ∈ `ok | partial | insufficient`.
 - `reasons[].source` ∈ `nasa | guideline | team_derived | baseline`.
+- `data_origin` ∈ `demo_playback | camera | simulated | camera_scan`.
+- `baseline_building` (addition): `{n, needed, label: "Baseline building (n/needed)"}` while a present vital has too
+  few baseline points (`n` = the fewest points among those vitals, `needed` = `min_points` for that data origin),
+  else `null`. The UI shows `label`.
 - `trend` may be `null`. `engine` names the implementation; swapping in an ML model only changes this field.
 - **Request** (`POST /api/v1/score`): `{"readings": [VitalsReading, …], "baseline_until": "ISO8601" | null}`, oldest → newest;
   the last reading is the one scored. Readings at or before `baseline_until` are the baseline phase (§7.1);
@@ -288,7 +317,7 @@ The Phase 0 fields are unchanged; everything below `disclaimer` is a sos-v0 addi
 {
   "crew_id": "CREW_01",
   "date": "2026-11-15",
-  "duty_status": "go",
+  "duty_status": "ready",
   "sleep": {"in_bed_minutes": null, "vs_baseline": null, "in_bed_hr_median": null},
   "morning_activity": {"completion_seconds": null, "vs_baseline_pct": null},
   "vitals_trend": [{"metric": "heart_rate_bpm", "days": 3, "direction": "stable"}],
@@ -302,7 +331,11 @@ The Phase 0 fields are unchanged; everything below `disclaimer` is a sos-v0 addi
   "disclaimer": "Decision support only. Not a diagnosis."
 }
 ```
-`duty_status` ∈ `go | caution | rest`. `summary_generated_by` ∈ `template | llm`.
+`duty_status` ∈ `ready | caution | rest` (`go` renamed `ready`, 2026-11-14). `summary_generated_by` ∈ `template | llm`.
+Additions (2026-11-14): `crew_source: synthetic | live`; `sleep.source: in_bed_estimate | self_report`,
+`sleep.self_report_hours`, `sleep.self_report_vs_baseline_hours`; `morning_activity.source: morning_post | scan_tests`,
+`morning_activity.tests: [{metric, value, baseline_median, n_prior, vs_baseline_pct}]`;
+`scan_verdict: null | {label: "Scan verdict", verdict, readiness_score, flags, reading_id, source: "scan_app", note}`.
 - **M5 template version (2026-11-14).** Built from the live Engine's (reading, score) history, so the report,
   SOS and `/score` share one source. `GET …/daily-report` returns **404** until the crew has readings (use
   `HALO_WARMUP_CSV` or `/admin/replay`); `date` defaults to the day of the crew's latest reading.
@@ -315,13 +348,23 @@ The Phase 0 fields are unchanged; everything below `disclaimer` is a sos-v0 addi
   (`morning_window_hours`, `team_derived`), worst status **after debounce**: a metric's z-band level counts
   only if its last 2 consecutive new measurements reach it (`duty_consecutive`); unfavourable trends count at
   once; **red flags count at once from any activity** (an absolute line just crossed is never hidden because
-  the reading was taken while active). Then normal → go, caution → caution, alert → rest. No resting reading
-  in the window → `caution`, never `go`. `watch_items` lists only the findings that counted.
+  the reading was taken while active). Then normal → ready, caution → caution, alert → rest. No resting reading
+  in the window → `caution`, never `ready`. `watch_items` lists only the findings that counted.
   `vitals_trend` comes from the latest resting reading (`insufficient` when the trend is null).
 - `recommendations` uses only three fixed `team_policy` sentences (`recommendations_source`, no medical
   content, `config/report.yaml`): an unfavourable trend → "Discuss the [metric] trend with the flight surgeon at
   the next contact."; no resting reading or a missing vital → "Take a fresh vitals reading."; `rest` →
   "Follow the flight surgeon’s guidance before resuming duties."
+- **Live crews** (camera scans, `build_live_report`): the report's reading is the day's latest scan (UTC date);
+  it is compared only with this crew's earlier scans. `sleep` = self-reported `sleep_hours` (`source: self_report`),
+  vs the median of ≥ 3 earlier self-reports; the in-bed fields are null. `morning_activity.tests` = `docking_error_pct`,
+  `docking_on_target_pct`, `reaction_median_ms`, each vs the median of ≥ 3 earlier scans (else null).
+  `scan_verdict` is the scan page's own result, shown verbatim and labelled "Scan verdict"; it never changes
+  `duty_status`, `watch_items` or the score. Duty = worst debounced status of the last `duty_consecutive` scans
+  (red flags of that day count at once); no scan that day or nothing assessable (baseline building) → `caution`.
+  `watch_items` names the vitals the scan did not measure and any dropped heart rate.
+- Any crew: a reading on which no vital could be assessed (all `insufficient`) is not used for duty, so a building
+  baseline never gives `ready`.
 - `environment_context` adds optional `reference_date, dose_day_ugy, level, threshold_source, source,
   prediction` (mission day N → 2024-05-01 + N−1; `level` from `halo_alert_rules`, watch/act → caution/alert;
   `prediction: "Model not trained"`). It never affects `duty_status` or `watch_items`.
@@ -341,6 +384,9 @@ The Phase 0 fields are unchanged; everything below `disclaimer` is a sos-v0 addi
   activities (`baseline_quality: partial`). If that still has fewer than `min_points`, the indicator is
   `insufficient` and no z band is applied (red flags still run). `min_points = 12` (`team_derived`, decided
   2026-11-14): 3 points is not a baseline, and a very narrow σ must not produce cautions.
+  **Live camera crews** (`min_points_by_origin: {camera_scan: 3}`, `team_derived`, 2026-11-14): about one scan a day
+  would need 12 days, so their own baseline starts at 3 scans; below that `baseline_quality: insufficient` and the
+  UI shows `baseline_building.label` ("Baseline building (n/3)"). Red flags still run. Baselines are always per crew.
 - **Baseline phase vs. no look-ahead (decided 2026-11-14).** The QR demo is baseline phase from start to end,
   so freezing "all baseline rows" would score each row against its own future. Instead, during the baseline
   phase the baseline accumulates in reading order from readings strictly *before* the one being scored; at
@@ -531,7 +577,7 @@ content**: suggestions are derived from the checklists' `red_flags`.
    resting vitals, 3-day trends, and the radiation environment reference.
 3. **Score:** call M3.
 4. **Template first:** build all structured fields and a template `summary_text`. Default `duty_status`
-   mapping (`team_derived`): normal → `go`, caution → `caution`, alert → `rest`.
+   mapping (`team_derived`): normal → `ready`, caution → `caution`, alert → `rest`.
 5. **Shell rewrite (online):** the LLM receives **only the structured fields** and writes one paragraph.
    Validate the result: every number in the text must appear in the fields. If validation fails, fall back
    to the template and set `summary_generated_by: "template"`.

@@ -14,7 +14,7 @@ from typing import Optional
 from ..core.config import ScoringConfig
 from ..core.models import VITAL_METRICS, ScoreResult, VitalsReading
 from ..core.rules import STATUS_RANK
-from .templates import _LABEL, summary_text
+from .templates import _LABEL, live_summary_text, summary_text
 
 DISCLAIMER = "Decision support only. Not a diagnosis."
 UTC = timezone.utc
@@ -31,6 +31,7 @@ class ReportConfig:
     morning_window_hours: float
     duty_consecutive: int
     rec: dict
+    live: dict
 
     @classmethod
     def from_dict(cls, d: dict) -> "ReportConfig":
@@ -40,7 +41,7 @@ class ReportConfig:
                    min_nights=int(d["min_nights_for_baseline"]), min_mornings=int(d["min_mornings_for_baseline"]),
                    duty_map=dict(d["duty_status"]), morning_window_hours=float(d["morning_window_hours"]),
                    duty_consecutive=int(d["duty_consecutive"]),
-                   rec=dict(d["recommendations"]))
+                   rec=dict(d["recommendations"]), live=dict(d.get("live") or {}))
 
 
 def mission_day_of(d: date, scfg: ScoringConfig) -> int:
@@ -114,6 +115,126 @@ def _pct(x: float, ref: float) -> float:
     return round((x - ref) / ref * 100, 1)
 
 
+def _assessable(sc: ScoreResult) -> bool:
+    return any(i.status != "insufficient" for i in sc.indicators if i.metric in VITAL_METRICS)
+
+
+def _recommendations(vitals_trend: list, latest: Optional[VitalsReading], duty: str, scfg: ScoringConfig,
+                     rcfg: ReportConfig) -> list[str]:
+    """Fixed team_policy sentences only (no medical content)."""
+    rec: list[str] = []
+    for t in vitals_trend:
+        bad = scfg.unfavourable[t["metric"]]
+        if (t["direction"] == "rising" and bad in ("high", "both")) or (t["direction"] == "falling" and bad in ("low", "both")):
+            rec.append(rcfg.rec["unfavourable_trend"].format(metric=_LABEL[t["metric"]]))
+    if latest is None or any(latest.value(m) is None for m in VITAL_METRICS):
+        rec.append(rcfg.rec["missing_data"])
+    if duty == "rest":
+        rec.append(rcfg.rec["rest"])
+    return list(dict.fromkeys(rec))
+
+
+def _ctx_num(r: VitalsReading, key: str) -> Optional[float]:
+    v = (r.scan_context or {}).get(key)
+    return float(v) if isinstance(v, (int, float)) and not isinstance(v, bool) and v == v else None
+
+
+def build_live_report(crew_id: str, d: date, history: list[tuple[VitalsReading, ScoreResult]],
+                      scfg: ScoringConfig, rcfg: ReportConfig, environment: Optional[dict] = None) -> dict:
+    """Daily report for a crew fed by real camera scans (about one scan a day). The day's latest scan is the
+    report's reading; it is compared only with this crew's own earlier scans."""
+    today = [(r, s) for r, s in history if r.timestamp.astimezone(UTC).date() == d]
+    scan = today[-1] if today else None
+    prior = [r for r, _ in history if scan is not None and r.timestamp < scan[0].timestamp]
+
+    hours = _ctx_num(scan[0], "sleep_hours") if scan else None
+    prev_hours = [h for h in (_ctx_num(r, "sleep_hours") for r in prior) if h is not None]
+    hours_vs = (round(hours - statistics.median(prev_hours), 2)
+                if hours is not None and len(prev_hours) >= rcfg.min_nights else None)
+
+    tests = []
+    for key in (rcfg.live.get("morning_tests") or []) if scan else []:
+        v = _ctx_num(scan[0], key)
+        prev = [x for x in (_ctx_num(r, key) for r in prior) if x is not None]
+        med = statistics.median(prev) if len(prev) >= rcfg.min_mornings else None
+        tests.append({"metric": key, "value": v, "baseline_median": med, "n_prior": len(prev),
+                      "vs_baseline_pct": _pct(v, med) if v is not None and med not in (None, 0) else None})
+
+    verdict = None
+    if scan:
+        ctx = scan[0].scan_context or {}
+        verdict = {"label": rcfg.live.get("scan_verdict_label", "Scan verdict"), "verdict": ctx.get("verdict"),
+                   "readiness_score": _ctx_num(scan[0], "readiness_score"), "flags": list(ctx.get("flags") or []),
+                   "reading_id": scan[0].reading_id, "source": "scan_app",
+                   "note": rcfg.live.get("scan_verdict_note", "")}
+
+    upto = [(r, s) for r, s in history if scan is not None and r.timestamp <= scan[0].timestamp]
+    recent = [(r, s) for r, s in upto[-rcfg.duty_consecutive:] if _assessable(s)]
+    duty_level, found = (debounced_status(recent, today, rcfg.duty_consecutive) if recent
+                         else (None, debounced_status([], today, rcfg.duty_consecutive)[1]))
+    duty = rcfg.duty_map[duty_level] if duty_level else rcfg.duty_map["no_data"]
+    if duty_level is None and any(STATUS_RANK[x.status] == 2 for _, sc in today for x in sc.reasons
+                                  if (x.metric, x.rule_id) in found):
+        duty = rcfg.duty_map["alert"]
+
+    watch: list[str] = []
+    if scan is None:
+        watch.append("No camera scan on this date. Missing, not assumed normal.")
+    else:
+        r, sc = scan
+        if sc.baseline_building:
+            watch.append(f"{sc.baseline_building['label']}: vitals are not compared with a personal baseline "
+                         f"until {sc.baseline_building['needed']} scans.")
+        missing = [_LABEL[m] for m in VITAL_METRICS if r.value(m) is None]
+        if missing:
+            watch.append(f"Not measured in this scan: {', '.join(missing)}. Missing, not assumed normal.")
+        for metric, why in ((r.scan_context or {}).get("excluded") or {}).items():
+            watch.append(f"{_LABEL.get(metric, metric).capitalize()} not used: {why}.")
+    latest_text = {}
+    for _, sc in recent + today:
+        for x in sc.reasons:
+            if (x.metric, x.rule_id) in found:
+                latest_text[(x.metric, x.rule_id)] = (STATUS_RANK[x.status], x.text)
+    watch.extend(t for _, t in sorted(latest_text.values(), key=lambda v: -v[0]))
+
+    days = int(scfg.trend_window) if scfg.trend_unit == "days" else 0
+    vitals_trend = []
+    for metric in VITAL_METRICS:
+        ind = next((i for i in scan[1].indicators if i.metric == metric), None) if scan else None
+        vitals_trend.append({"metric": metric, "days": days,
+                             "direction": ind.trend.direction if ind is not None and ind.trend else "insufficient"})
+
+    sources = sorted({s.data_origin for _, s in today})
+    if hours is not None:
+        sources.append("self_report")
+    if scan:
+        sources.append("scan_app")
+    report = {
+        "crew_id": crew_id,
+        "date": d.isoformat(),
+        "duty_status": duty,
+        "crew_source": "live",
+        "sleep": {"in_bed_minutes": None, "vs_baseline": None, "in_bed_hr_median": None, "source": "self_report",
+                  "self_report_hours": hours, "self_report_vs_baseline_hours": hours_vs},
+        "morning_activity": {"completion_seconds": None, "vs_baseline_pct": None, "source": "scan_tests",
+                             "tests": tests},
+        "scan_verdict": verdict,
+        "vitals_trend": vitals_trend,
+        "environment_context": environment or {"label": "Historical ISS radiation - May 2024",
+                                               "is_personal_dose": False},
+        "watch_items": watch,
+        "recommendations": _recommendations(vitals_trend, scan[0] if scan else None, duty, scfg, rcfg),
+        "recommendations_source": rcfg.rec["source"],
+        "summary_text": "",
+        "summary_generated_by": "template",
+        "data_sources": sources + (["NASA historical reference"] if environment and environment.get("dose_day_ugy")
+                                   is not None else []),
+        "disclaimer": DISCLAIMER,
+    }
+    report["summary_text"] = live_summary_text(report, duty_level, len(recent), rcfg.duty_consecutive)
+    return report
+
+
 def build_daily_report(crew_id: str, d: date, history: list[tuple[VitalsReading, ScoreResult]],
                        scfg: ScoringConfig, rcfg: ReportConfig, environment: Optional[dict] = None,
                        mornings: Optional[dict] = None) -> dict:
@@ -141,7 +262,8 @@ def build_daily_report(crew_id: str, d: date, history: list[tuple[VitalsReading,
     #    of the morning window and takes the worst status, so one late reading can neither hide nor create it.
     m_lo = cutoff - timedelta(hours=rcfg.morning_window_hours)
     morning_all = [(r, s) for r, s in window if r.timestamp >= m_lo]
-    morning = [(r, s) for r, s in morning_all if r.activity == "resting"]
+    # a reading where no vital could be assessed (baseline still building) cannot support "ready" (§3.5)
+    morning = [(r, s) for r, s in morning_all if r.activity == "resting" and _assessable(s)]
     latest_rest = morning[-1] if morning else None
 
     days = int(scfg.trend_window) if scfg.trend_unit == "days" else 0
@@ -154,7 +276,7 @@ def build_daily_report(crew_id: str, d: date, history: list[tuple[VitalsReading,
     # 4. template ---------------------------------------------------------------------------------------
     if morning:
         duty_level, found = debounced_status(morning, morning_all, rcfg.duty_consecutive)
-    else:                                           # no resting reading: unknown, never "go" (red flags still show)
+    else:                                           # no resting reading: unknown, never "ready" (red flags still show)
         duty_level, found = None, debounced_status([], morning_all, rcfg.duty_consecutive)[1]
     duty = rcfg.duty_map[duty_level] if duty_level else rcfg.duty_map["no_data"]
     if duty_level is None and any(STATUS_RANK[x.status] == 2 for _, sc in morning_all for x in sc.reasons
@@ -162,7 +284,7 @@ def build_daily_report(crew_id: str, d: date, history: list[tuple[VitalsReading,
         duty = rcfg.duty_map["alert"]
     watch: list[str] = []
     if not morning:
-        watch.append("No resting vitals in the morning window. Missing, not assumed normal.")
+        watch.append("No assessable resting vitals in the morning window. Missing, not assumed normal.")
     latest_text = {}
     for _, sc in morning_all:                       # most recent wording of each finding that counted
         for x in sc.reasons:
@@ -174,17 +296,7 @@ def build_daily_report(crew_id: str, d: date, history: list[tuple[VitalsReading,
         rules = sorted({x.rule_id for s in night_alerts for x in s.reasons if x.status == "alert"})
         watch.append(f"{len(night_alerts)} alert reading(s) since {lo:%H:%M} the previous day ({', '.join(rules)}).")
 
-    # recommendations: fixed team_policy sentences only (no medical content)
-    rec: list[str] = []
-    for t in vitals_trend:
-        bad = scfg.unfavourable[t["metric"]]
-        if (t["direction"] == "rising" and bad in ("high", "both")) or (t["direction"] == "falling" and bad in ("low", "both")):
-            rec.append(rcfg.rec["unfavourable_trend"].format(metric=_LABEL[t["metric"]]))
-    if not morning or any(latest_rest[0].value(m) is None for m in VITAL_METRICS):
-        rec.append(rcfg.rec["missing_data"])
-    if duty == "rest":
-        rec.append(rcfg.rec["rest"])
-    recommendations = list(dict.fromkeys(rec))
+    recommendations = _recommendations(vitals_trend, latest_rest[0] if latest_rest else None, duty, scfg, rcfg)
 
     origins = sorted({s.data_origin for _, s in window})
     data_sources = origins + (["NASA historical reference"] if environment else [])
@@ -192,9 +304,13 @@ def build_daily_report(crew_id: str, d: date, history: list[tuple[VitalsReading,
         "crew_id": crew_id,
         "date": d.isoformat(),
         "duty_status": duty,
+        "crew_source": "synthetic",
         "sleep": {"in_bed_minutes": minutes, "vs_baseline": sleep_vs,
-                  "in_bed_hr_median": statistics.median(bed_hr) if bed_hr else None},
-        "morning_activity": {"completion_seconds": done_s, "vs_baseline_pct": morning_vs},
+                  "in_bed_hr_median": statistics.median(bed_hr) if bed_hr else None, "source": "in_bed_estimate",
+                  "self_report_hours": None, "self_report_vs_baseline_hours": None},
+        "morning_activity": {"completion_seconds": done_s, "vs_baseline_pct": morning_vs, "source": "morning_post",
+                             "tests": []},
+        "scan_verdict": None,
         "vitals_trend": vitals_trend,
         "environment_context": environment or {"label": "Historical ISS radiation - May 2024",
                                                "is_personal_dose": False},

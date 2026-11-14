@@ -21,6 +21,7 @@ class MetricEval:
     reasons: list[Reason] = field(default_factory=list)
     quality: Optional[str] = None      # ok | partial | insufficient; None when the value is missing
     alert_streak: int = 0              # consecutive new readings beyond the alert band, including this one
+    building_n: Optional[int] = None   # baseline points available when there is no baseline yet
 
 
 def is_new_measurement(reading: VitalsReading, metric: str, seen_before: bool, prev_value: Optional[float],

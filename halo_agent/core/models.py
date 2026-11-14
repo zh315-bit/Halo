@@ -32,6 +32,8 @@ class VitalsReading:
     display_label: str = ""
     # Not part of the §6.2 wire contract: True while the crew is in its baseline phase (§7.1).
     in_baseline_phase: bool = True
+    # Camera-scan extras kept verbatim (test scores, self-report, the scan page's own verdict). Never scored.
+    scan_context: Optional[dict] = field(default=None, compare=False, hash=False)
 
     def value(self, metric: str) -> Optional[float]:
         return getattr(self, metric)
@@ -98,6 +100,8 @@ class ScoreResult:
     data_origin: str
     indicators: list[Indicator] = field(default_factory=list)
     reasons: list[Reason] = field(default_factory=list)
+    # {"n", "needed", "label": "Baseline building (n/needed)"} while a present vital has too few baseline points.
+    baseline_building: Optional[dict] = None
 
     def to_dict(self) -> dict:
         return asdict(self)

@@ -14,7 +14,7 @@ from .baseline import select_baseline
 from .config import ScoringConfig
 from .models import VITAL_METRICS, LatestReading, ScoreResult, VitalsReading
 from .rules import MetricEval, evaluate_new, is_new_measurement, missing_eval
-from .score import assemble, iso_z
+from .score import assemble, check_one_kind, data_origin_of, iso_z
 from .trend import window_points
 
 
@@ -32,6 +32,7 @@ class _MetricState:
 class _CrewState:
     frozen: bool = False
     last_ts: object = None
+    live: Optional[bool] = None                      # real camera data vs demo/simulated; never mixed per crew
     metrics: dict = field(default_factory=lambda: {m: _MetricState() for m in VITAL_METRICS})
     latest: Optional[ScoreResult] = None
     last_reading: Optional[VitalsReading] = None
@@ -77,10 +78,15 @@ class Engine:
         return result
 
     def _update(self, r: VitalsReading) -> ScoreResult:
+        origin = data_origin_of(r, self.cfg)          # unknown origin fails before any state changes
+        need = self.cfg.min_points_for(origin)
         with self._lock:
-            st = self._crews.setdefault(r.crew_id, _CrewState())
+            st = self._crews.get(r.crew_id) or _CrewState()
+            live = check_one_kind(st.live, r, origin, self.cfg)
             if st.last_ts is not None and r.timestamp < st.last_ts:
                 raise ValueError(f"reading {r.reading_id} is older than the last one for {r.crew_id}")
+            st.live = live
+            self._crews[r.crew_id] = st
             st.last_ts = r.timestamp
             if not r.in_baseline_phase:
                 st.frozen = True                     # baseline never changes again (§7.1)
@@ -93,7 +99,7 @@ class Engine:
                     per[m] = (missing_eval(m, self.cfg), None)
                     continue
                 if is_new_measurement(r, m, ms.seen, prev_value, self.cfg):
-                    baseline, quality = select_baseline(ms.pool, r.activity, m, self.cfg)
+                    baseline, quality, avail = select_baseline(ms.pool, r.activity, m, self.cfg, need)
                     prev = ms.last_eval.alert_streak if ms.last_eval else 0
                     hist = ms.history.setdefault(r.activity, [])
                     hist.append((r.timestamp, v))
@@ -101,6 +107,7 @@ class Engine:
                     if len(hist) > 4 * len(pts) + 64:          # keep memory bounded on long feeds
                         del hist[:len(hist) - len(pts) - 32]
                     ms.last_eval = evaluate_new(r, m, baseline, quality, prev, pts, self.cfg)
+                    ms.last_eval.building_n = None if baseline else avail
                     ms.last_new_ts = r.timestamp
                     if not st.frozen:                # added AFTER scoring: no self-reference
                         ms.pool.setdefault(r.activity, []).append(v)
@@ -146,6 +153,12 @@ class Engine:
         with self._lock:
             st = self._crews.get(crew_id)
             return list(st.log) if st else []
+
+    def is_live(self, crew_id: str) -> Optional[bool]:
+        """True for a crew fed with real camera scans, False for demo/simulated data, None if unknown."""
+        with self._lock:
+            st = self._crews.get(crew_id)
+            return st.live if st else None
 
     def crews(self) -> list[str]:
         with self._lock:
