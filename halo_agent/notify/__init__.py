@@ -8,8 +8,10 @@ from .base import AlertMessage, AlertSender, SendResult  # noqa: F401
 from .dryrun import DryRunSender  # noqa: F401
 from .queue import QueueSender  # noqa: F401
 from .twilio_sms import TwilioSender  # noqa: F401
+from .bridge import TwilioBridgeSender  # noqa: F401
 
 
 def alert_mode() -> str:
-    """dry_run (default) | live. Anything other than `live` means dry_run."""
-    return "live" if os.environ.get("ALERT_MODE", "dry_run").strip().lower() == "live" else "dry_run"
+    """dry_run (default) | live (Twilio SDK) | bridge (team Twilio bridge). Anything else means dry_run."""
+    m = os.environ.get("ALERT_MODE", "dry_run").strip().lower()
+    return m if m in ("live", "bridge") else "dry_run"

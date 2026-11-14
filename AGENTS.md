@@ -559,7 +559,15 @@ time, session id) — no medical text.
   `TWILIO_AUTH_TOKEN`, `TWILIO_FROM_NUMBER`, `MISSION_SUPPORT_NUMBER`. One automatic retry; still failing →
   `failed`, UI "Alert not delivered. Continue the checklist.", checklist continues. Trial accounts can only text
   verified numbers.
-- **Phase 3:** voice call (TwiML), `ACK <session>` SMS replies with signature check, status callbacks.
+- Online, `ALERT_MODE=bridge` → `TwilioBridgeSender` (`notify/bridge.py`): `POST $TWILIO_BRIDGE_URL/alerts/send`
+  (default `http://127.0.0.1:8000`) with `{"level": "act", "message"}` to the team bridge
+  (github.com/Dhruvachaitanya13/halo `twilio/halo_twilio.py`), which owns recipients, SMS and calls. Sent when the
+  bridge reports ≥ 1 SMS; otherwise → `QueueSender` (`queued_offline`, UI "Alert bridge unreachable…"), retried in a
+  background thread at most every 30 s. Report level never sent.
+- Inbound (crew texts / calls via the bridge): `halo_agent/integrations/twilio_bridge.py` provides the bridge's
+  `ask_agent(text, mode, sender)` and `current_status()` (stdlib only, HTTP to `HALO_AGENT_URL`, 5 s timeout, ≤ 300
+  chars, never raises). Details: docs/INTEGRATION.md "Twilio: how to connect".
+- **Phase 3:** voice call (TwiML) from HALO's own Twilio SDK sender, `ACK <session>` SMS replies, status callbacks.
 
 ### 8.5 Proactive nudge (`sos/nudge.py`, `config/nudges.yaml`)
 Suggests checking on a crewmate when their score turns `alert`. Deterministic, offline, no LLM, **no new medical
@@ -607,10 +615,11 @@ camera_scan`, fed by main's `POST /api/v1/scan`). Everything live is labelled **
   (`reading_id, timestamp, data_origin, measurement_origin, first_used_at`) split into live camera readings (+ the scan
   summaries used) and replayed/simulated readings ("Replayed demo or simulated data (not a live measurement)").
   The two are never merged; a block is `null` when empty.
-- **Smoke:** `uv run python scripts/smoke_sos.py` — `demo` (CREW_01) and `scan` (POST the fixture as `LIVE_01` →
-  SOS → `camera_scan`, missing + note, `scan_context`, `live_data`). `/api/v1/scan` exists on main (2026-11-14),
-  so `scan` must PASS. Request body: the scan record plus `crew_id` (`scan_body()`); `/scan` also accepts
-  `{crew_id, record}`. `core.latest_scan` is provided by main.
+- **Smoke:** `uv run python scripts/smoke_sos.py [--url URL] [--only demo|scan|sos_event] [--crew ID]` — `demo`
+  (CREW_01), `scan` (POST the fixture to `/api/v1/scan` as `{crew_id, record}` → SOS → `camera_scan`, missing + note,
+  `scan_context`, `live_data`; must PASS now that main provides `/scan` and `core.latest_scan`; with `--url` the crew
+  defaults to `LIVE_SMOKE` because `/scan` persists), and `sos_event` (replay `SIMULATED_sos_event.csv` → nudge →
+  accept → breathing checklist to END; nudges are one per crew per 5 min, so on a reused server wait between runs).
 
 ## 9. M5 — Daily report
 
@@ -733,8 +742,12 @@ The core must install and run without the `shell` extras.
 **Phase 3 — Sat late night. Demo data and extras.** Drop anything that isn't done.
 - `make_drift_scenario.py` → `SIMULATED_drift_7d.csv`: 7 days of slowly rising resting HR and falling
   SpO2. No red flag fires; trend `caution` with a finite `days_to_alert` appears by day 4–5.
-- `make_sos_scenario.py` → `SIMULATED_sos_event.csv`: an acute SpO2 drop + HR rise that reaches `alert`.
-  **Pending Kavya's OK** (⚑ Q4).
+- `make_sos_scenario.py` → `SIMULATED_sos_event.csv` (**done**, ⚑ Q4 decided 2026-11-14: scripted SIMULATED
+  scenario, clearly labelled): crew `SIM_CREW_SOS`, 2-day calm baseline (no alert), then day 3 08:00 an acute event
+  while resting — SpO₂ 98 → 89 at 08:05 (the first alert carries only `spo2_low`) → 86, HR 72 → 118, resp 15 → 26,
+  SBP 118 → 138 (no `bp_crisis`, no `fever`). Seeded; the committed file equals a fresh run (tested). Smoke scenario
+  `sos_event`: replay → nudge (red flag, breathing_difficulty first) → accept → breathing checklist to END.
+  Demo scene `sos_event` for `config/demo.yaml` (main): docs/INTEGRATION.md "SOS event scene".
 - Radiation `environment_context`, and Twilio if confirmed.
 
 **Phase 4 — only if everything else is done.** Bone density, confidence polish, local-LLM experiments.
@@ -758,7 +771,8 @@ algorithms, tuning a local LLM.
 1. **Ownership:** is the Agent officially Chris's, and does scoring stay with Chris?
 2. **Interfaces (Kavya, Dhruv):** CSV column names as the schema? Timestamp generation? Blink-rate field name? REST vs WS for the live feed?
 3. **Protocol source (Kavya):** which public, medically reviewed checklists? Which 2–3 symptoms for the demo?
-4. **Emergency data (Kavya):** a real public segment, or a scripted SIMULATED scenario clearly labelled?
+4. **Emergency data (Kavya):** ~~a real public segment, or a scripted SIMULATED scenario clearly labelled?~~
+   Decided 2026-11-14: scripted SIMULATED (`data/SIMULATED_sos_event.csv`).
 5. **BP values (Kavya):** baseline at 162/58 rising to SBP 189 — intentional?
 6. **Morning activity:** what is it, how is it timed, and which endpoint receives it?
 7. **Twilio:** use it? SMS only or calls too? Whose account and phone?

@@ -161,3 +161,73 @@ an SOS on it. Afterwards clean up with:
 ```bash
 curl -X DELETE "http://127.0.0.1:8000/api/v1/admin/live-scans?crew_id=LIVE_SMOKE"
 ```
+
+## Twilio: how to connect (team bridge `twilio/halo_twilio.py` ↔ HALO)
+
+Two processes: the team's Twilio bridge on **:8000** (`uvicorn halo_twilio:app --port 8000`) and the HALO Agent on
+**:8001**. They talk over HTTP in both directions.
+
+**1. Bridge → HALO (crew texts / calls).** In `twilio/halo_twilio.py`, replace the two stub functions
+(`ask_agent` and `current_status`, the block under `# ---- stubs to replace`) with one import:
+
+```python
+from halo_agent.integrations.twilio_bridge import ask_agent, current_status
+```
+
+Same names and signatures as the stubs. The module is standard-library only, so the bridge needs no HALO
+dependencies: either run the bridge with `PYTHONPATH=<path to the HALO repo>`, or copy
+`halo_agent/integrations/twilio_bridge.py` next to `halo_twilio.py` and use
+`from twilio_bridge import ask_agent, current_status`. Bridge env:
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `HALO_AGENT_URL` | `http://127.0.0.1:8001` | where the HALO Agent runs |
+| `HALO_BRIDGE_CREW` | `CREW_01` | crew an SMS emergency / daily report is about |
+
+What the crew gets (every reply ≤ 300 characters; 5 s timeout; on any error a safe fixed reply, never an exception):
+
+| Text | HALO does |
+|---|---|
+| `EMERGENCY …` / `HELP …` / `SOS …` | starts an SOS from the text → `SOS 1/5: <step> Reply DONE / CANT / CHANGED` |
+| `DONE` / `CANT` / `CHANGED` (also `SKIP`) | the step action for **this phone's** open SOS → next step; at the end "checklist complete" |
+| any other text | `/agent/ask`, scoped to this phone's open SOS if there is one |
+| daily report (`/reports/daily`) | the report's `summary_text` |
+| incoming call | `current_status()`: worst crew status, `normal` / `watch` (caution) / `act` (alert); `unknown` if HALO has no data |
+
+Open SOS sessions are remembered per phone number in the bridge process (a restart forgets them; the crew texts
+EMERGENCY again). Ending a session (resolve / hand off) stays in the HALO console.
+
+**2. HALO → bridge (alerts to mission control).** Start HALO with:
+
+```bash
+ALERT_MODE=bridge TWILIO_BRIDGE_URL=http://127.0.0.1:8000 uv run uvicorn halo_agent.api.app:app --port 8001
+```
+
+Every urgent SOS escalation is `POST $TWILIO_BRIDGE_URL/alerts/send` with `{"level": "act", "message": "<one
+sentence>"}` (the bridge's `Alert` model; `act` = SMS + phone call to `MISSION_CONTROL_NUMBERS`). Report-level
+escalations (e.g. fainting f7) are never sent. If the bridge is down or sends nothing, the alert is queued
+(`queued_offline`, UI "Alert bridge unreachable: alert queued and retried automatically") and retried in the
+background at most every 30 s; the checklist never waits. Recipients are configured on the bridge only.
+
+Checked end to end (2026-11-14): a copy of `halo_twilio.py` with the import above, `TWILIO_VALIDATE=0`, form posts
+to `/twilio/sms` and `/twilio/voice`, and HALO alerts posted to `/alerts/send` (503 without Twilio credentials →
+queued as designed).
+
+## SOS event scene (for `config/demo.yaml`, owned by main)
+
+`data/SIMULATED_sos_event.csv` (from `scripts/make_sos_scenario.py`, SIMULATED, crew `SIM_CREW_SOS`) is ready.
+Add this scene to `config/demo.yaml` (and drop the "There is no SOS-event scene yet" comment there):
+
+```yaml
+  sos_event:
+    description: "SIMULATED acute event crew SIM_CREW_SOS: calm 2-day baseline, then SpO2 drops to 86 % with HR rising -> spo2_low red flag, alert, nudge to the breathing checklist."
+    replay: {file: SIMULATED_sos_event.csv, speed: 3600}
+    mode: online
+```
+
+At 3600× the whole file takes about 57 s: about 56 s of baseline, then the event (first alert, `spo2_low`, at
+day 3 08:05). The nudge for `SIM_CREW_SOS` appears as soon as that reading is scored (Engine hook → `on_nudge`):
+`GET /api/v1/crew/SIM_CREW_SOS/nudges`, then `POST /api/v1/nudges/{id}/accept {"symptom": "breathing_difficulty"}`.
+For an instant version use `load: [SIMULATED_sos_event.csv]` instead of `replay`. Nudges are limited to one per
+crew per 5 minutes, so run `reset` (or wait) before replaying the scene again in the same server.
+

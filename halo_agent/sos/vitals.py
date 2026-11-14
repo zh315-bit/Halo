@@ -48,7 +48,11 @@ def _iso(ts) -> Optional[str]:
 def _origin(measurement_origin: Optional[str]) -> Optional[str]:
     if measurement_origin is None:
         return None
-    return "demo_playback" if measurement_origin == "master_csv_playback_not_camera" else measurement_origin
+    if measurement_origin == "master_csv_playback_not_camera":
+        return "demo_playback"
+    if measurement_origin.upper() == "SIMULATED":       # generated files (AGENTS.md §3.6): data_origin = simulated
+        return "simulated"
+    return measurement_origin
 
 
 def empty_snapshot() -> dict:
