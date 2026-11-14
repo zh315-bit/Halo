@@ -37,6 +37,15 @@ class VitalsReading:
         return getattr(self, metric)
 
 
+@dataclass(frozen=True)
+class LatestReading(VitalsReading):
+    """The last reading the Engine processed for a crew, plus when each vital was last NEWLY measured.
+    It is a VitalsReading, so callers that only need the values can ignore the extra fields."""
+    measured_at: dict = field(default_factory=dict)         # vital -> ISO8601 of its last new measurement
+    metric_age_seconds: dict = field(default_factory=dict)  # vital -> seconds since that measurement (None = missing)
+    age_seconds: float = 0.0                                # seconds since this reading's timestamp
+
+
 @dataclass
 class Baseline:
     median: float

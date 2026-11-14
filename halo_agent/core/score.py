@@ -18,6 +18,7 @@ from .baseline import QUALITY_RANK, select_baseline
 from .config import ScoringConfig
 from .models import OPTIONAL_METRICS, VITAL_METRICS, Baseline, Indicator, ScoreResult, VitalsReading
 from .rules import STATUS_RANK, MetricEval, evaluate_new, is_new_measurement, missing_eval
+from .trend import window_points
 
 
 def iso_z(ts) -> str:
@@ -104,7 +105,10 @@ def _score_crew(seq: list[VitalsReading], cfg: ScoringConfig) -> list[ScoreResul
         baseline, quality = select_baseline(pool, seq[j].activity, m, cfg)
         prev = next((k for k in range(j - 1, -1, -1) if new[m][k]), None)
         prev_streak = eval_at(m, prev).alert_streak if prev is not None else 0
-        memo[(m, j)] = ev = evaluate_new(seq[j], m, baseline, quality, prev_streak, cfg)
+        hist = [(seq[k].timestamp, seq[k].value(m)) for k in range(j + 1)
+                if new[m][k] and seq[k].activity == seq[j].activity]
+        pts = window_points(hist, seq[j].timestamp, cfg)
+        memo[(m, j)] = ev = evaluate_new(seq[j], m, baseline, quality, prev_streak, pts, cfg)
         return ev
 
     out = []

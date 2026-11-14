@@ -345,3 +345,23 @@ class ModeRequest(_Request):
 class ModeResponse(_Strict):
     mode: Mode
     source: Literal["env", "runtime_toggle"]
+
+
+# ---------- admin replay (demo feed until M1; every reading goes through core Engine.update) ----------
+class ReplayRequest(_Request):
+    file: str                                   # a .csv inside data/ ("qr_scan_demo_clean.csv" or "data/...")
+    speed: float = Field(default=60.0, gt=0, le=1_000_000)   # × real time: 60 -> a 5-min gap takes 5 s
+    reset: bool = True                          # clear the live Engine first
+
+
+class ReplayStatus(_Strict):
+    state: Literal["idle", "running", "done", "stopped", "error"]
+    file: Optional[str]
+    speed: Optional[float]
+    index: int                                  # readings fed so far
+    total: int
+    last_reading_id: Optional[str]
+    last_as_of: Optional[str]
+    last_status: Optional[Status]
+    started_at: Optional[str]
+    error: Optional[str]

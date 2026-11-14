@@ -86,5 +86,7 @@ def reading_to_wire(r: VitalsReading) -> dict:
 
 
 def load_csv(path: str | Path, cfg: Optional[ScoringConfig] = None) -> list[VitalsReading]:
+    """Lines starting with '#' are comments (generated files carry a SIMULATED note there)."""
     with open(path, newline="", encoding="utf-8") as f:
-        return [reading_from_csv_row(r, cfg) for r in csv.DictReader(f)]
+        lines = (line for line in f if not line.startswith("#"))
+        return [reading_from_csv_row(r, cfg) for r in csv.DictReader(lines)]

@@ -117,10 +117,12 @@ Severity is `0–3`. External level names `watch` / `act` (threshold JSONs) map 
 | **POST /api/v1/sos** | start an SOS session, return step 1 | **Chris** |
 | **POST /api/v1/sos/{session_id}/step** | submit `done` / `cannot_do` / `condition_changed`, return the next step | **Chris** |
 | **POST /api/v1/sos/{session_id}/classify** | free text → top-3 symptom candidates (shell) | **Chris** |
+| **POST /api/v1/sos/{session_id}/confirm** | crewmate confirms one problem type `{"symptom": ...}` after `/classify` (or the picker) → `SosSession`; a different type switches the checklist | **Chris** |
 | **POST /api/v1/agent/ask** | free question; with `session_id` it is limited to that checklist | **Chris** |
 | **POST /api/v1/activity/morning** | morning activity result, triggers the daily report. Body `{crew_id, date?, completed_at?, completion_seconds?}` → **202** `{"accepted": true, "report_date": "YYYY-MM-DD"}` (stub until ⚑ Q6) | **Chris** |
 | **GET /api/v1/crew/{crew_id}/daily-report?date=** | daily report | **Chris** |
 | **POST /api/v1/admin/mode** | toggle online/offline (demo) | **Chris** |
+| **POST / GET / DELETE /api/v1/admin/replay** | demo feed until M1: POST `{file, speed=60, reset=true}` → **202** `ReplayStatus` (feeds a `data/*.csv` into the live Engine at `speed`× real time via `Engine.update`; 409 if one is running; only files inside `data/`); GET = progress; DELETE = stop. Startup warm-up: env `HALO_WARMUP_CSV=<file in data/>` | **Chris** |
 
 `/classify` is an addition to the design doc: it keeps classification separate from session start.
 All of Chris's endpoints must first exist as **stubs returning fixed JSON** (Phase 0).
@@ -310,6 +312,10 @@ The Phase 0 fields are unchanged; everything below `disclaimer` is a sos-v0 addi
 - `|slope| ≥ 0.5 σ / day` → `rising` / `falling`, otherwise `stable`. An unfavourable direction adds a
   `caution` reason (`source: baseline`).
 - `days_to_alert = (alert boundary − current value) / slope`. Include it only when it is > 0 and ≤ 14.
+- A days/hours step with fewer than `min_points_per_step` (6, `team_derived`) new readings is left out of
+  the fit, so one reading just after midnight cannot drive the slope. Trends are computed from new
+  measurements only, at or before the scored reading. The alert boundary is `median ± alert_z × σ` on the
+  side the trend is heading.
 
 ### 7.4 Absolute red flags (`red_flags.yaml`)
 Red flags override the baseline and set the indicator to `alert`. Values are **provisional**: each rule has

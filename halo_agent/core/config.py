@@ -38,6 +38,7 @@ class ScoringConfig:
     baseline_scenarios: tuple[str, ...]
     min_points: int
     mad_scale: float
+    no_pool_metrics: frozenset
     mad_floor: dict
     caution_z: float
     alert_z: float
@@ -47,13 +48,22 @@ class ScoringConfig:
     baseline_full_n: float
     fresh_full_minutes: float
     fresh_zero_minutes: float
+    trend_window: float
+    trend_unit: str
+    trend_min_steps: int
+    trend_min_points_per_step: int
+    trend_slope_sigma_per_day: float
+    trend_min_slope_t: Optional[float]
+    days_to_alert_max: float
     data_origin: dict
     metric_display: dict
     red_flags: tuple[RedFlag, ...]
 
     @classmethod
     def from_dicts(cls, scoring: dict, red_flags: dict) -> "ScoringConfig":
-        b, z, c = scoring["baseline"], scoring["z_bands"], scoring["confidence"]
+        b, z, c, t = scoring["baseline"], scoring["z_bands"], scoring["confidence"], scoring["trend"]
+        if t["unit"] not in ("days", "hours", "readings"):
+            raise ValueError("trend.unit must be days | hours | readings")
         for m in VITAL_METRICS:
             for section in ("mad_floor",):
                 if m not in b[section]:
@@ -79,6 +89,7 @@ class ScoringConfig:
             baseline_scenarios=tuple(scoring["baseline_scenarios"]),
             min_points=int(b["min_points"]),
             mad_scale=float(b["mad_scale"]),
+            no_pool_metrics=frozenset(b.get("no_pool_metrics") or ()),
             mad_floor={k: float(v) for k, v in b["mad_floor"].items()},
             caution_z=float(z["caution"]),
             alert_z=float(z["alert"]),
@@ -88,6 +99,13 @@ class ScoringConfig:
             baseline_full_n=float(c["baseline_full_n"]),
             fresh_full_minutes=float(c["fresh_full_minutes"]),
             fresh_zero_minutes=float(c["fresh_zero_minutes"]),
+            trend_window=float(t["window"]),
+            trend_unit=t["unit"],
+            trend_min_steps=int(t["min_steps"]),
+            trend_min_points_per_step=int(t["min_points_per_step"]),
+            trend_slope_sigma_per_day=float(t["slope_sigma_per_day"]),
+            trend_min_slope_t=None if t.get("min_slope_t") is None else float(t["min_slope_t"]),
+            days_to_alert_max=float(t["days_to_alert_max"]),
             data_origin=dict(scoring["data_origin"]),
             metric_display=dict(scoring["metrics"]),
             red_flags=tuple(rules),

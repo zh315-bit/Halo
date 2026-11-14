@@ -149,10 +149,17 @@ def test_few_points_is_insufficient():
 
 
 def test_pooled_fallback_is_partial():
-    seq = history(12) + [sim(12, activity="in_bed", heart_rate_bpm=60.0)]
+    seq = history(12) + [sim(12, activity="in_bed", heart_rate_bpm=60.0, spo2_pct=97.0)]
     res = score(seq, CFG)[-1]
-    hr = ind(res, "heart_rate_bpm")
-    assert hr.baseline.group == "pooled" and hr.baseline.n == 12 and res.baseline_quality == "partial"
+    sp = ind(res, "spo2_pct")
+    assert sp.baseline.group == "pooled" and sp.baseline.n == 12 and res.baseline_quality == "insufficient"
+
+
+def test_hr_never_pooled():
+    # no_pool_metrics: in-bed HR with only resting history -> insufficient, not a false "low" vs resting
+    seq = history(12) + [sim(12, activity="in_bed", heart_rate_bpm=90.0)]
+    hr = ind(score(seq, CFG)[-1], "heart_rate_bpm")
+    assert hr.status == "insufficient" and hr.baseline is None
 
 
 def test_below_min_points_no_narrow_sigma_caution():
@@ -215,5 +222,27 @@ def test_score_latest():
         for r in history():
             core.get_engine().update(r)
         assert core.score_latest("SIM_FIXTURE").reading_id == "SIM_0011"
+    finally:
+        core.set_engine(None)
+
+
+def test_latest_reading_matches_score_latest():
+    from datetime import timedelta as td
+    t = [0.0]
+    eng = Engine(CFG, wall=lambda: t[0])
+    core.set_engine(eng)
+    try:
+        assert core.latest_reading("SIM_FIXTURE") is None
+        seq = history() + [sim(12, new_bp=False, new_temp=False, heart_rate_bpm=71.0)]   # BP etc. carried
+        for r in seq:
+            eng.update(r)
+        lr = core.latest_reading("SIM_FIXTURE")
+        assert isinstance(lr, VitalsReading) and lr.reading_id == core.score_latest("SIM_FIXTURE").reading_id
+        assert lr.age_seconds == 0 and lr.metric_age_seconds["heart_rate_bpm"] == 0
+        assert lr.metric_age_seconds["systolic_bp_mmhg"] == 300          # last new BP was 5 min earlier
+        assert lr.measured_at["systolic_bp_mmhg"] == "2026-11-15T08:55:00Z"
+        t[0] = 30.0                                                      # 30 s of wall time later
+        assert core.latest_reading("SIM_FIXTURE").age_seconds == 30
+        assert eng.latest_reading("SIM_FIXTURE", now=seq[-1].timestamp + td(minutes=10)).age_seconds == 600
     finally:
         core.set_engine(None)

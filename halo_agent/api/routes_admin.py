@@ -5,9 +5,10 @@ from __future__ import annotations
 
 import os
 
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 
-from .schemas import ModeRequest, ModeResponse
+from .replay import ReplayPathError, replayer
+from .schemas import ModeRequest, ModeResponse, ReplayRequest, ReplayStatus
 
 router = APIRouter(prefix="/api/v1/admin", tags=["admin"])
 
@@ -35,3 +36,28 @@ def set_mode(req: ModeRequest) -> ModeResponse:
     global _runtime_mode
     _runtime_mode = req.mode
     return ModeResponse(mode=current_mode(), source=mode_source())
+
+
+@router.post("/replay", response_model=ReplayStatus, status_code=202)
+def replay_start(req: ReplayRequest) -> dict:
+    """Feed a data/ CSV into the live Engine at `speed`× real time (demo feed until M1)."""
+    try:
+        return replayer.start(req.file, req.speed, req.reset)
+    except ReplayPathError as e:
+        raise HTTPException(422, str(e))
+    except FileNotFoundError:
+        raise HTTPException(404, f"no such file in data/: {req.file}")
+    except RuntimeError as e:
+        raise HTTPException(409, str(e))
+    except (KeyError, ValueError) as e:            # CSV that the adapter can't read
+        raise HTTPException(422, f"cannot read {req.file}: {e}")
+
+
+@router.get("/replay", response_model=ReplayStatus)
+def replay_status() -> dict:
+    return replayer.status()
+
+
+@router.delete("/replay", response_model=ReplayStatus)
+def replay_stop() -> dict:
+    return replayer.stop()

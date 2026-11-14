@@ -49,16 +49,30 @@ def test_sos_is_real_now(client):
     assert client.post("/api/v1/sos", json={"crew_id": "CREW_01"}).status_code == 422
 
 
-def test_classify_stub(client):
-    c = _ok(client.post("/api/v1/sos/sos_001/classify", json={"free_text": "hard to breathe"}), S.ClassifyResponse)
-    assert len(c.candidates) == 3 and c.requires_confirmation
+def _session(client):
+    r = client.post("/api/v1/sos", json={"crew_id": "CREW_01", "symptom": "breathing_difficulty"})
+    assert r.status_code == 200, r.text
+    return r.json()["session_id"]
 
 
-def test_ask(client):
-    a = _ok(client.post("/api/v1/agent/ask", json={"question": "why?", "session_id": "sos_001"}), S.AskResponse)
-    assert a.citations and a.citations[0].kind == "checklist_step"
-    a = _ok(client.post("/api/v1/agent/ask", json={"question": "why?"}), S.AskResponse)
-    assert a.answer == "The checklist doesn't cover this — contact ground."
+def test_classify_contract(client):
+    # Real since sos-v0 phase 2. Source depends on whether an LLM is reachable, so only the contract here;
+    # LLM behaviour is covered with FakeLLM in tests/test_sos_shell.py.
+    sid = _session(client)
+    c = _ok(client.post(f"/api/v1/sos/{sid}/classify", json={"free_text": "hard to breathe"}), S.ClassifyResponse,
+            stub=False)
+    assert c.session_id == sid and c.requires_confirmation and c.candidates
+    assert client.post("/api/v1/sos/nope/classify", json={"free_text": "x"}).status_code == 404
+
+
+def test_ask_contract(client):
+    sid = _session(client)
+    a = _ok(client.post("/api/v1/agent/ask", json={"question": "why?", "session_id": sid}), S.AskResponse, stub=False)
+    assert a.session_id == sid and a.disclaimer == DISCLAIMER
+    if a.answered_by == "llm":                 # §3.3: an LLM answer must cite a checklist step
+        assert a.citations and a.citations[0].kind == "checklist_step"
+    a = _ok(client.post("/api/v1/agent/ask", json={"question": "why?"}), S.AskResponse, stub=False)
+    assert a.session_id is None
 
 
 def test_daily_report(client):
@@ -72,10 +86,12 @@ def test_offline_toggle_propagates(client):
     r = client.post("/api/v1/admin/mode", json={"mode": "offline"})
     assert r.json() == {"mode": "offline", "source": "runtime_toggle"}
     s = client.post("/api/v1/sos", json={"crew_id": "CREW_01", "symptom": "breathing_difficulty"}).json()
+    sid = s["session_id"]
     assert s["mode"] == "offline" and s["escalation"]["state"] == "queued_offline"
-    assert client.post("/api/v1/sos/x/classify", json={"free_text": "t"}).json()["source"] == "picker_fallback"
-    assert client.post("/api/v1/agent/ask", json={"question": "q"}).json()["answer"] == \
-        "Not covered offline — follow the checklist"
+    c = client.post(f"/api/v1/sos/{sid}/classify", json={"free_text": "t"}).json()
+    assert c["source"] == "picker_fallback" and c["mode"] == "offline"
+    a = client.post("/api/v1/agent/ask", json={"question": "q", "session_id": sid}).json()
+    assert a["answer"] == "Not covered offline — follow the checklist" and a["answered_by"] == "fixed_reply"
     assert client.post("/api/v1/admin/mode", json={"mode": "online"}).json()["mode"] == "online"
 
 
