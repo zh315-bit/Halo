@@ -45,6 +45,8 @@ All values are in `config/scoring.yaml` and `config/red_flags.yaml`; nothing is 
 | Trend | 3-day window, ≥ 6 readings per day, \|slope\| ≥ 0.5 σ/day **and** slope t ≥ 2.3 | team_derived | — |
 | `days_to_alert` | shown when 0 < d ≤ 14 | team_derived | — |
 | Confidence | baseline × freshness (1 up to 30 min → 0 at 6 h) × completeness | team_derived | — |
+| Daily report duty | resting readings of the last 4 h before the report, z level counts after 2 new readings in a row; trends and red flags (any activity) count at once | team_derived | — |
+| Report recommendations | three fixed sentences, no medical content | team_policy | — |
 | Red flag `spo2_low` | SpO₂ < 90 % | guideline | **no** |
 | Red flag `fever` | temp ≥ 38.0 °C | guideline | **no** |
 | Red flag `bp_crisis` | SBP ≥ 180 mmHg | guideline (AHA hypertensive crisis category) | **no** |
@@ -74,7 +76,9 @@ the symptom picker, a fixed reply and the template text when offline.
 
 - Radiation prediction model: none exists, the UI shows "Model not trained".
 - Bone density in scoring (Phase 4), ML scoring model, face-scan vital-sign algorithms.
-- Daily report LLM rewrite (waits for the shared `LLMClient`).
+- Daily report LLM rewrite (waits for the shared `LLMClient`). The template report is live:
+  `GET /api/v1/crew/{crew_id}/daily-report?date=` (sleep is estimated from `in_bed` periods; there are no
+  sleep stages in the data).
 
 ## AI tools used during development
 

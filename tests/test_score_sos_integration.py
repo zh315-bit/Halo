@@ -24,7 +24,7 @@ def test_sos_uses_score_latest(monkeypatch):
         s = TestClient(app).post("/api/v1/sos", json={"crew_id": "CREW_01", "symptom": "breathing_difficulty"})
         assert s.status_code == 200, s.text
         j = s.json()
-        assert j["score"] == {"status": "alert", "severity": 3}
+        assert (j["score"]["status"], j["score"]["severity"]) == ("alert", 3)   # sos may add fields
         assert "severity_max" in j["escalation"]["reasons"]
     finally:
         core.set_engine(old)

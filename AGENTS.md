@@ -119,7 +119,7 @@ Severity is `0–3`. External level names `watch` / `act` (threshold JSONs) map 
 | **POST /api/v1/sos/{session_id}/classify** | free text → top-3 symptom candidates (shell) | **Chris** |
 | **POST /api/v1/sos/{session_id}/confirm** | crewmate confirms one problem type `{"symptom": ...}` after `/classify` (or the picker) → `SosSession`; a different type switches the checklist | **Chris** |
 | **POST /api/v1/agent/ask** | free question; with `session_id` it is limited to that checklist | **Chris** |
-| **POST /api/v1/activity/morning** | morning activity result, triggers the daily report. Body `{crew_id, date?, completed_at?, completion_seconds?}` → **202** `{"accepted": true, "report_date": "YYYY-MM-DD"}` (stub until ⚑ Q6) | **Chris** |
+| **POST /api/v1/activity/morning** | morning activity result for the daily report. Body `{crew_id, date?, completed_at?, completion_seconds?}` → **202** `{"accepted": true, "report_date": "YYYY-MM-DD"}`; stored in memory and used by the report (the activity itself is still ⚑ Q6) | **Chris** |
 | **GET /api/v1/crew/{crew_id}/daily-report?date=** | daily report | **Chris** |
 | **POST /api/v1/admin/mode** | toggle online/offline (demo) | **Chris** |
 | **POST / GET / DELETE /api/v1/admin/replay** | demo feed until M1: POST `{file, speed=60, reset=true}` → **202** `ReplayStatus` (feeds a `data/*.csv` into the live Engine at `speed`× real time via `Engine.update`; 409 if one is running; only files inside `data/`); GET = progress; DELETE = stop. Startup warm-up: env `HALO_WARMUP_CSV=<file in data/>` | **Chris** |
@@ -287,12 +287,13 @@ The Phase 0 fields are unchanged; everything below `disclaimer` is a sos-v0 addi
   "crew_id": "CREW_01",
   "date": "2026-11-15",
   "duty_status": "go",
-  "sleep": {"in_bed_minutes": null, "vs_baseline": null},
+  "sleep": {"in_bed_minutes": null, "vs_baseline": null, "in_bed_hr_median": null},
   "morning_activity": {"completion_seconds": null, "vs_baseline_pct": null},
   "vitals_trend": [{"metric": "heart_rate_bpm", "days": 3, "direction": "stable"}],
   "environment_context": {"label": "Historical ISS radiation - May 2024", "is_personal_dose": false},
   "watch_items": [],
   "recommendations": [],
+  "recommendations_source": "team_policy",
   "summary_text": "...",
   "summary_generated_by": "template",
   "data_sources": ["demo_playback"],
@@ -300,6 +301,28 @@ The Phase 0 fields are unchanged; everything below `disclaimer` is a sos-v0 addi
 }
 ```
 `duty_status` ∈ `go | caution | rest`. `summary_generated_by` ∈ `template | llm`.
+- **M5 template version (2026-11-14).** Built from the live Engine's (reading, score) history, so the report,
+  SOS and `/score` share one source. `GET …/daily-report` returns **404** until the crew has readings (use
+  `HALO_WARMUP_CSV` or `/admin/replay`); `date` defaults to the day of the crew's latest reading.
+- Night window for date D: `[D−1 18:00, D 12:00)`, cut at the morning activity's `completed_at` if one was
+  posted (`config/report.yaml`). `sleep.in_bed_minutes` = in-bed readings × sampling step, **null** unless
+  readings cover ≥ 80 % of the window. `sleep.vs_baseline` = minutes vs the median of ≥ 3 earlier nights.
+  `morning_activity.vs_baseline_pct` = % vs the median of ≥ 3 earlier mornings (⚑ Q6), else null.
+- `sleep.in_bed_hr_median` = median HR over the night's in-bed readings (null with the minutes).
+- `duty_status` (decided 2026-11-14): the **resting** readings of the morning window `[cutoff − 4 h, cutoff]`
+  (`morning_window_hours`, `team_derived`), worst status **after debounce**: a metric's z-band level counts
+  only if its last 2 consecutive new measurements reach it (`duty_consecutive`); unfavourable trends count at
+  once; **red flags count at once from any activity** (an absolute line just crossed is never hidden because
+  the reading was taken while active). Then normal → go, caution → caution, alert → rest. No resting reading
+  in the window → `caution`, never `go`. `watch_items` lists only the findings that counted.
+  `vitals_trend` comes from the latest resting reading (`insufficient` when the trend is null).
+- `recommendations` uses only three fixed `team_policy` sentences (`recommendations_source`, no medical
+  content, `config/report.yaml`): an unfavourable trend → "Discuss the [metric] trend with the flight surgeon at
+  the next contact."; no resting reading or a missing vital → "Take a fresh vitals reading."; `rest` →
+  "Follow the flight surgeon’s guidance before resuming duties."
+- `environment_context` adds optional `reference_date, dose_day_ugy, level, threshold_source, source,
+  prediction` (mission day N → 2024-05-01 + N−1; `level` from `halo_alert_rules`, watch/act → caution/alert;
+  `prediction: "Model not trained"`). It never affects `duty_status` or `watch_items`.
 
 ## 7. M2 + M3 — baseline and scoring (core)
 
