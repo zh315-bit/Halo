@@ -93,12 +93,33 @@ class NudgeStateError(Exception):
     pass
 
 
+QUALITY_RANK = {"insufficient": 0, "partial": 1, "ok": 2}
+
+
 @dataclass(frozen=True)
 class NudgeConfig:
     priority: dict
     max_suggestions: int
     min_interval_s: float
     snooze_minutes: tuple
+    z_band_min_baseline_quality: str = "ok"
+
+
+def alert_baseline_quality(score: dict) -> str:
+    """Worst baseline quality among the indicators behind the z-band alert reasons (falls back to the score's
+    top-level baseline_quality). A missing indicator baseline counts as insufficient, a pooled one as partial."""
+    alerting = {r.get("metric") for r in score.get("reasons") or []
+                if r.get("rule_id") == "z_band" and r.get("status") == "alert"}
+    worst = None
+    for ind in score.get("indicators") or []:
+        if ind.get("metric") not in alerting:
+            continue
+        b = ind.get("baseline")
+        q = "insufficient" if not b else ("partial" if b.get("group") == "pooled" else "ok")
+        worst = q if worst is None or QUALITY_RANK[q] < QUALITY_RANK[worst] else worst
+    if worst is None:
+        worst = score.get("baseline_quality") or "ok"
+    return worst if worst in QUALITY_RANK else "ok"
 
 
 def parse_config(data: dict, checklists: dict[str, Checklist], path: str = "<dict>") -> NudgeConfig:
@@ -106,7 +127,8 @@ def parse_config(data: dict, checklists: dict[str, Checklist], path: str = "<dic
         raise NudgeConfigError(f"{path}: {msg}")
     if not isinstance(data, dict):
         bad("must be a mapping")
-    extra = set(data) - {"priority", "max_suggestions", "min_interval_s", "snooze_minutes"}
+    extra = set(data) - {"priority", "max_suggestions", "min_interval_s", "snooze_minutes",
+                         "z_band_min_baseline_quality"}
     if extra:
         bad(f"unknown keys {sorted(extra)}")
     prio = data.get("priority") or {}
@@ -128,7 +150,10 @@ def parse_config(data: dict, checklists: dict[str, Checklist], path: str = "<dic
         bad("max_suggestions, min_interval_s and snooze_minutes are required numbers")
     if mx < 1 or gap < 0 or not snooze or min(snooze) <= 0:
         bad("max_suggestions >= 1, min_interval_s >= 0, snooze_minutes positive")
-    return NudgeConfig({k: tuple(v) for k, v in prio.items()}, mx, gap, snooze)
+    zq = data.get("z_band_min_baseline_quality", "ok")
+    if zq not in QUALITY_RANK:
+        bad(f"z_band_min_baseline_quality must be one of {tuple(QUALITY_RANK)}")
+    return NudgeConfig({k: tuple(v) for k, v in prio.items()}, mx, gap, snooze, zq)
 
 
 def load_config(checklists: dict[str, Checklist], path: Path = CONFIG) -> NudgeConfig:
@@ -238,15 +263,19 @@ class NudgeService:
         elif self.active(crew_id):
             why = "nudge_already_active"
         base = {"crew_id": crew_id, "at": _iso(now), "reading_id": score.get("reading_id")}
-        if why:
-            self._log({**base, "event": "nudge_suppressed", "why": why})
-            return None
         reasons = score.get("reasons") or []
         fired = []
         for r in reasons:
             rid = r.get("rule_id")
             if rid in self.red_flags and r.get("status") == "alert" and rid not in fired:
                 fired.append(rid)
+        if not why and not fired:
+            q = alert_baseline_quality(score)       # z-band only: needs a baseline we trust
+            if QUALITY_RANK[q] < QUALITY_RANK[self.cfg.z_band_min_baseline_quality]:
+                why = f"z_band_baseline_{q}"
+        if why:
+            self._log({**base, "event": "nudge_suppressed", "why": why})
+            return None
         sugg = suggest(fired, self.sos.checklists, self.cfg)
         text = TEXT if not fired else f"{TEXT}. Red flag: {', '.join(fired)}."
         n = {"nudge_id": f"ndg_{uuid.uuid4().hex[:8]}", "crew_id": crew_id, "created_at": _iso(now),

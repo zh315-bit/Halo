@@ -82,6 +82,7 @@ def reading_to_wire(r: VitalsReading) -> dict:
         **{m: r.value(m) for m in VITAL_METRICS + OPTIONAL_METRICS},
         "new_reading": {"bp": r.new_bp, "temp": r.new_temp},
         "measurement_origin": r.measurement_origin, "display_label": r.display_label,
+        "scan_context": r.scan_context,
     }
 
 

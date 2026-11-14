@@ -2,18 +2,20 @@
 
 from __future__ import annotations
 
+import copy
+import logging
 import threading
 import time
 from collections import deque
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timedelta
-from typing import Optional
+from typing import Callable, Optional
 
 from .baseline import select_baseline
 from .config import ScoringConfig
 from .models import VITAL_METRICS, LatestReading, ScoreResult, VitalsReading
 from .rules import MetricEval, evaluate_new, is_new_measurement, missing_eval
-from .score import assemble, iso_z
+from .score import assemble, check_one_kind, data_origin_of, iso_z
 from .trend import window_points
 
 
@@ -31,11 +33,15 @@ class _MetricState:
 class _CrewState:
     frozen: bool = False
     last_ts: object = None
+    live: Optional[bool] = None                      # real camera data vs demo/simulated; never mixed per crew
     metrics: dict = field(default_factory=lambda: {m: _MetricState() for m in VITAL_METRICS})
     latest: Optional[ScoreResult] = None
     last_reading: Optional[VitalsReading] = None
     received_wall: float = 0.0                       # time.monotonic() when last_reading was processed
     log: deque = field(default_factory=lambda: deque(maxlen=Engine.HISTORY_MAX))   # (reading, result)
+
+
+log = logging.getLogger("halo.core.engine")
 
 
 class Engine:
@@ -45,14 +51,43 @@ class Engine:
     def __init__(self, cfg: ScoringConfig, wall=time.monotonic):
         self.cfg = cfg
         self._wall = wall
+        self._listeners: list[Callable[[ScoreResult], None]] = []
         self._crews: dict[str, _CrewState] = {}
         self._lock = threading.Lock()
 
-    def update(self, r: VitalsReading) -> ScoreResult:
+    def add_listener(self, fn: Callable[[ScoreResult], None]) -> Callable[[], None]:
+        """Call fn(score) after every update (outside the Engine lock, so fn may call latest() etc.).
+        A listener that raises is logged and skipped; update() still returns its result. Returns a remover."""
         with self._lock:
-            st = self._crews.setdefault(r.crew_id, _CrewState())
+            self._listeners.append(fn)
+
+        def remove() -> None:
+            with self._lock:
+                if fn in self._listeners:
+                    self._listeners.remove(fn)
+        return remove
+
+    def update(self, r: VitalsReading) -> ScoreResult:
+        result = self._update(r)
+        with self._lock:
+            listeners = list(self._listeners)
+        for fn in listeners:
+            try:
+                fn(result)
+            except Exception:
+                log.exception("Engine listener %r failed; score %s kept", fn, result.reading_id)
+        return result
+
+    def _update(self, r: VitalsReading) -> ScoreResult:
+        origin = data_origin_of(r, self.cfg)          # unknown origin fails before any state changes
+        need = self.cfg.min_points_for(origin)
+        with self._lock:
+            st = self._crews.get(r.crew_id) or _CrewState()
+            live = check_one_kind(st.live, r, origin, self.cfg)
             if st.last_ts is not None and r.timestamp < st.last_ts:
                 raise ValueError(f"reading {r.reading_id} is older than the last one for {r.crew_id}")
+            st.live = live
+            self._crews[r.crew_id] = st
             st.last_ts = r.timestamp
             if not r.in_baseline_phase:
                 st.frozen = True                     # baseline never changes again (§7.1)
@@ -65,7 +100,7 @@ class Engine:
                     per[m] = (missing_eval(m, self.cfg), None)
                     continue
                 if is_new_measurement(r, m, ms.seen, prev_value, self.cfg):
-                    baseline, quality = select_baseline(ms.pool, r.activity, m, self.cfg)
+                    baseline, quality, avail = select_baseline(ms.pool, r.activity, m, self.cfg, need)
                     prev = ms.last_eval.alert_streak if ms.last_eval else 0
                     hist = ms.history.setdefault(r.activity, [])
                     hist.append((r.timestamp, v))
@@ -73,6 +108,7 @@ class Engine:
                     if len(hist) > 4 * len(pts) + 64:          # keep memory bounded on long feeds
                         del hist[:len(hist) - len(pts) - 32]
                     ms.last_eval = evaluate_new(r, m, baseline, quality, prev, pts, self.cfg)
+                    ms.last_eval.building_n = None if baseline else avail
                     ms.last_new_ts = r.timestamp
                     if not st.frozen:                # added AFTER scoring: no self-reference
                         ms.pool.setdefault(r.activity, []).append(v)
@@ -113,11 +149,26 @@ class Engine:
             return LatestReading(**asdict(r), measured_at=measured, metric_age_seconds=ages,
                                  age_seconds=round((now - r.timestamp).total_seconds(), 1))
 
+    def latest_scan(self, crew_id: str) -> Optional[dict]:
+        """The crew's last scan record exactly as the scan page posted it (copy), or None."""
+        with self._lock:
+            st = self._crews.get(crew_id)
+            for r, _ in reversed(st.log if st else ()):
+                if r.raw_scan is not None:
+                    return copy.deepcopy(r.raw_scan)
+        return None
+
     def history(self, crew_id: str) -> list[tuple[VitalsReading, ScoreResult]]:
         """(reading, score) pairs this Engine produced for the crew, oldest first (bounded)."""
         with self._lock:
             st = self._crews.get(crew_id)
             return list(st.log) if st else []
+
+    def is_live(self, crew_id: str) -> Optional[bool]:
+        """True for a crew fed with real camera scans, False for demo/simulated data, None if unknown."""
+        with self._lock:
+            st = self._crews.get(crew_id)
+            return st.live if st else None
 
     def crews(self) -> list[str]:
         with self._lock:

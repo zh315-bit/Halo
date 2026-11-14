@@ -9,11 +9,11 @@ morning_window_hours: 4           # team_derived: duty_status = worst debounced 
                                   # [cutoff - 4 h, cutoff] (cutoff = morning activity time, else night end)
 duty_consecutive: 2               # team_derived: within that window a metric's caution/alert counts only if
                                   # reached on this many consecutive NEW measurements (red flags count at once)
-duty_status:                      # §9.4 default mapping (team_derived)
-  normal: go
+duty_status:                      # §9.4 default mapping (team_derived). "go" renamed "ready" (2026-11-14)
+  normal: ready
   caution: caution
   alert: rest
-  no_data: caution                # no resting reading in the morning window: never "go" on missing data (§3.5)
+  no_data: caution                # no assessable resting reading in the morning window: never "ready" on missing data (§3.5)
 radiation_reference:              # environment only; never changes a crew member's status (§5)
   file: data/radiation_5min.csv
   label: "Historical ISS radiation - May 2024"
@@ -25,3 +25,9 @@ recommendations:                  # source: team_policy. Fixed sentences, no med
   unfavourable_trend: "Discuss the {metric} trend with the flight surgeon at the next contact."
   missing_data: "Take a fresh vitals reading."
   rest: "Follow the flight surgeon’s guidance before resuming duties."
+live:                             # crews fed by real camera scans (POST /api/v1/scan); team_derived
+  # duty = worst debounced status of the crew's last `duty_consecutive` scans up to the day's latest scan;
+  # red flags of that day's scans count at once. Sleep = self-reported sleep_hours (source: self_report).
+  morning_tests: [docking_error_pct, docking_on_target_pct, reaction_median_ms]   # vs median of >= min_mornings earlier scans
+  scan_verdict_label: "Scan verdict"
+  scan_verdict_note: "The scan page's own result. HALO's duty status is computed separately against your personal baseline."

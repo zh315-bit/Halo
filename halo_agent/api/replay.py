@@ -93,8 +93,9 @@ class Replayer:
         with self._lock:
             if self.running():
                 raise RuntimeError("a replay is already running; DELETE it first")
-            if reset:
-                eng.reset()
+            if reset:                              # only the crews in this file: live scans and other feeds stay
+                for cid in dict.fromkeys(r.crew_id for r in readings):
+                    eng.reset(cid)
             self._stop.clear()
             self._status = {**self._idle(), "state": "running", "file": path.name, "speed": speed,
                             "total": len(readings), "started_at": _iso_now()}

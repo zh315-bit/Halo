@@ -1,0 +1,414 @@
+{
+  "session_id": "bf1cbc96-7418-4f3a-b623-65b47f98dc59",
+  "created_at": "2026-11-14T22:35:12.136Z",
+  "app_version": "0.9.0",
+  "mode": "standard",
+  "heart_bpm": null,
+  "heart_quality": 0.15,
+  "heart_confidence": 0.17,
+  "heart_method": "pos",
+  "heart_region": "left",
+  "heart_min_bpm": null,
+  "heart_max_bpm": null,
+  "heart_trend_bpm_per_min": null,
+  "hrv_rmssd_ms": null,
+  "hrv_sdnn_ms": null,
+  "beat_irregularity_pct": null,
+  "breathing_brpm": 10.3,
+  "breathing_quality": 0.5,
+  "breathing_source": "head",
+  "breathing_interval_cv_pct": 31.6,
+  "blink_rate_per_min": 4,
+  "mean_blink_ms": 84,
+  "long_closures": 1,
+  "perclos_pct": 0,
+  "yawns": 0,
+  "reaction_median_ms": 384,
+  "reaction_lapses": 0,
+  "reaction_false_starts": 2,
+  "reaction_trials": 6,
+  "gonogo_hit_rate_pct": 50,
+  "gonogo_false_alarms": 1,
+  "gonogo_median_rt_ms": 640,
+  "memory_span": null,
+  "heart_task_bpm": null,
+  "heart_recovery_bpm": null,
+  "expression_label": "neutral",
+  "smile_pct": 0,
+  "brow_furrow_pct": 0,
+  "mood_label": "neutral",
+  "mood_valence": -2,
+  "self_mood": 4,
+  "docking_error_pct": 2.8,
+  "docking_on_target_pct": 98.6,
+  "docking_docked": true,
+  "sleep_hours": 8,
+  "self_alertness": 4,
+  "scan_seconds": 45,
+  "frames": 2409,
+  "motion_pct": 0.2,
+  "scan_grade": "C",
+  "reference_heart_bpm": null,
+  "reference_breathing_brpm": null,
+  "heart_error_bpm": null,
+  "heart_task_delta_bpm": null,
+  "heart_recovery_delta_bpm": null,
+  "breathing_error_brpm": null,
+  "ml_unusual_moments": 0,
+  "ml_check_score": null,
+  "ml_check_unusual": null,
+  "verdict": "rest",
+  "readiness_score": 76,
+  "flags": [
+    "1 eye closure(s) longer than half a second",
+    "2 early taps"
+  ],
+  "notes": [
+    "heart rate not reliable enough to report"
+  ],
+  "details": {
+    "score_parts": {
+      "respiratory": 86,
+      "alertness": 85,
+      "cognitive": 48,
+      "sleep": 100
+    },
+    "deviations": {
+      "heart_bpm": null,
+      "breathing_brpm": null,
+      "reaction_median_ms": null,
+      "blink_rate_per_min": null
+    },
+    "scan_issues": [
+      "low frame rate (15 per second)",
+      "weak pulse signal"
+    ],
+    "candidates": [
+      {
+        "region": "forehead",
+        "method": "pos",
+        "bpm": 68,
+        "quality": 0.09
+      },
+      {
+        "region": "forehead",
+        "method": "chrom",
+        "bpm": 58,
+        "quality": 0.14
+      },
+      {
+        "region": "forehead",
+        "method": "green",
+        "bpm": 45.5,
+        "quality": 0.13
+      },
+      {
+        "region": "left",
+        "method": "pos",
+        "bpm": 55.5,
+        "quality": 0.15
+      },
+      {
+        "region": "left",
+        "method": "chrom",
+        "bpm": 59,
+        "quality": 0.11
+      },
+      {
+        "region": "left",
+        "method": "green",
+        "bpm": 51.5,
+        "quality": 0.13
+      },
+      {
+        "region": "right",
+        "method": "pos",
+        "bpm": 79,
+        "quality": 0.15
+      },
+      {
+        "region": "right",
+        "method": "chrom",
+        "bpm": 78.5,
+        "quality": 0.15
+      },
+      {
+        "region": "right",
+        "method": "green",
+        "bpm": 51,
+        "quality": 0.14
+      },
+      {
+        "region": "all",
+        "method": "pos",
+        "bpm": 66.5,
+        "quality": 0.12
+      },
+      {
+        "region": "all",
+        "method": "chrom",
+        "bpm": 67.5,
+        "quality": 0.1
+      },
+      {
+        "region": "all",
+        "method": "green",
+        "bpm": 83.5,
+        "quality": 0.11
+      }
+    ],
+    "heart_series": [
+      {
+        "t": 5,
+        "bpm": 44,
+        "quality": 0.39
+      },
+      {
+        "t": 6,
+        "bpm": 44,
+        "quality": 0.4
+      },
+      {
+        "t": 7,
+        "bpm": 43,
+        "quality": 0.38
+      },
+      {
+        "t": 8,
+        "bpm": 44,
+        "quality": 0.36
+      },
+      {
+        "t": 9,
+        "bpm": 44,
+        "quality": 0.3
+      },
+      {
+        "t": 10,
+        "bpm": 44,
+        "quality": 0.28
+      },
+      {
+        "t": 11,
+        "bpm": 44,
+        "quality": 0.28
+      },
+      {
+        "t": 12,
+        "bpm": 43,
+        "quality": 0.25
+      },
+      {
+        "t": 13,
+        "bpm": 42,
+        "quality": 0.22
+      },
+      {
+        "t": 14,
+        "bpm": 42,
+        "quality": 0.19
+      },
+      {
+        "t": 15,
+        "bpm": 42,
+        "quality": 0.12
+      },
+      {
+        "t": 16,
+        "bpm": 42,
+        "quality": 0.13
+      },
+      {
+        "t": 17,
+        "bpm": 62,
+        "quality": 0.31
+      },
+      {
+        "t": 18,
+        "bpm": 63,
+        "quality": 0.34
+      },
+      {
+        "t": 19,
+        "bpm": 65,
+        "quality": 0.37
+      },
+      {
+        "t": 20,
+        "bpm": 66,
+        "quality": 0.38
+      },
+      {
+        "t": 21,
+        "bpm": 42,
+        "quality": 0.17
+      },
+      {
+        "t": 22,
+        "bpm": 50,
+        "quality": 0.35
+      },
+      {
+        "t": 23,
+        "bpm": 52,
+        "quality": 0.46
+      },
+      {
+        "t": 24,
+        "bpm": 53,
+        "quality": 0.52
+      },
+      {
+        "t": 25,
+        "bpm": 53,
+        "quality": 0.5
+      },
+      {
+        "t": 26,
+        "bpm": 53,
+        "quality": 0.44
+      },
+      {
+        "t": 27,
+        "bpm": 54,
+        "quality": 0.37
+      },
+      {
+        "t": 28,
+        "bpm": 56,
+        "quality": 0.36
+      },
+      {
+        "t": 29,
+        "bpm": 57,
+        "quality": 0.47
+      },
+      {
+        "t": 30,
+        "bpm": 60,
+        "quality": 0.57
+      },
+      {
+        "t": 31,
+        "bpm": 61,
+        "quality": 0.51
+      },
+      {
+        "t": 32,
+        "bpm": 61,
+        "quality": 0.4
+      }
+    ],
+    "breathing": {
+      "chest": {
+        "brpm": null,
+        "quality": 0,
+        "seconds": 44.860099999904634,
+        "reason": "too_few_samples"
+      },
+      "from_beats": null,
+      "agree": null,
+      "estimates": [
+        {
+          "name": "head",
+          "brpm": 10.3,
+          "quality": 0.54
+        }
+      ],
+      "breaths": 6,
+      "interval_cv_pct": 31.6,
+      "longest_gap_s": 10.4
+    },
+    "tests": {
+      "reaction": {
+        "trials": 6,
+        "median_ms": 384,
+        "mean_ms": 386,
+        "fastest_ms": 321,
+        "slowest_ms": 480,
+        "lapses": 0,
+        "false_starts": 2,
+        "misses": 0
+      },
+      "gonogo": {
+        "trials": 12,
+        "hits": 4,
+        "misses": 4,
+        "false_alarms": 1,
+        "hit_rate_pct": 50,
+        "false_alarm_rate_pct": 25,
+        "median_rt_ms": 640,
+        "rt_variability_ms": 62
+      },
+      "docking": {
+        "samples": 2853,
+        "mean_error_pct": 2.8,
+        "time_on_target_pct": 98.6,
+        "final_error_pct": 1.8,
+        "time_to_first_lock_s": 0,
+        "steadiness_pct": 1.6,
+        "docked": true
+      },
+      "mission": {
+        "points": 1962,
+        "best_streak": 7,
+        "game_version": 2
+      }
+    },
+    "settings": {
+      "mode": "standard",
+      "method": "auto",
+      "camera": "user",
+      "overlay": true,
+      "validation": false,
+      "keepCamera": true,
+      "sound": true
+    },
+    "expression": {
+      "frames": 164,
+      "label": "neutral",
+      "now": "neutral",
+      "valence": -2,
+      "shares": {
+        "smiling": 0,
+        "tense": 0,
+        "frowning": 0,
+        "surprised": 0,
+        "neutral": 100
+      },
+      "expressiveness": 0.02
+    },
+    "ml": {
+      "model": "isolation forest",
+      "windows": 9,
+      "moments": [],
+      "check": {
+        "score": null,
+        "n": 0,
+        "needed": 8
+      }
+    },
+    "trends": {
+      "Reaction time": {
+        "label": "not enough checks yet",
+        "n": 1,
+        "change_pct": null
+      },
+      "Docking error": {
+        "label": "not enough checks yet",
+        "n": 1,
+        "change_pct": null
+      },
+      "Memory span": {
+        "label": "not enough checks yet",
+        "n": 0,
+        "change_pct": null
+      },
+      "Readiness score": {
+        "label": "not enough checks yet",
+        "n": 1,
+        "change_pct": null
+      }
+    }
+  }
+}

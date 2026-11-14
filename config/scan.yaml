@@ -1,0 +1,17 @@
+# Camera-scan ingest (POST /api/v1/scan, /api/v1/scan/upload). Records come from the team's scan page
+# (repo Dhruvachaitanya13/Halo, table `scans` in scan/supabase_schema.sql). All values team_derived.
+live_crew_id: LIVE_01           # crew_id used when the request gives none
+min_heart_quality: 0.35         # heart_bpm with heart_quality below this (or missing) is dropped -> missing
+min_breathing_quality: 0.35     # same for breathing_brpm / breathing_quality (the scan page's QUALITY_MIN)
+activity: resting               # the scan is taken seated at rest
+measurement_origin: camera_scan # -> data_origin camera_scan (scoring.yaml)
+display_label: "Live camera measurement (experimental)"
+# Kept verbatim in VitalsReading.scan_context; never scored.
+context_fields: [reaction_median_ms, reaction_lapses, reaction_false_starts, reaction_trials,
+                 gonogo_hit_rate_pct, gonogo_false_alarms, gonogo_median_rt_ms, memory_span,
+                 docking_error_pct, docking_on_target_pct, docking_docked,
+                 sleep_hours, self_alertness, self_mood, verdict, readiness_score, flags]
+# Browser origins allowed to call the API (the scan page on GitHub Pages; any localhost / 127.0.0.1 port).
+cors:
+  allow_origins: ["https://dhruvachaitanya13.github.io"]
+  allow_origin_regex: "^https?://(localhost|127\\.0\\.0\\.1)(:[0-9]+)?$"

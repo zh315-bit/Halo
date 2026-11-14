@@ -29,3 +29,9 @@ def load_scoring_config(directory: str | None = None) -> ScoringConfig:
 def load_report_config(directory: str | None = None) -> dict:
     d = Path(directory) if directory else config_dir()
     return yaml.safe_load((d / "report.yaml").read_text(encoding="utf-8"))
+
+
+@lru_cache(maxsize=None)
+def load_scan_dict(directory: str | None = None) -> dict:
+    d = Path(directory) if directory else config_dir()
+    return yaml.safe_load((d / "scan.yaml").read_text(encoding="utf-8"))

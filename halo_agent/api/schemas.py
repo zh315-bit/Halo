@@ -51,6 +51,7 @@ class VitalsReading(_Request):
     new_reading: NewReading
     measurement_origin: str
     display_label: str
+    scan_context: Optional[dict] = None        # camera scans only: test scores, self-report, scan verdict (not scored)
 
 
 # ---------- 6.3 ScoreResult ----------
@@ -89,6 +90,12 @@ class Reason(_Strict):
     text: str
 
 
+class BaselineBuilding(_Strict):
+    n: int
+    needed: int
+    label: str                                 # "Baseline building (n/needed)"
+
+
 class ScoreResult(_Strict):
     crew_id: str
     reading_id: str
@@ -98,9 +105,10 @@ class ScoreResult(_Strict):
     confidence: float = Field(ge=0.0, le=1.0)
     baseline_quality: Literal["ok", "partial", "insufficient"]
     engine: str
-    data_origin: Literal["demo_playback", "camera", "simulated"]
+    data_origin: Literal["demo_playback", "camera", "simulated", "camera_scan"]
     indicators: list[Indicator]
     reasons: list[Reason]
+    baseline_building: Optional[BaselineBuilding] = None   # a present vital has too few baseline points
 
 
 class ScoreRequest(_Request):
@@ -165,6 +173,42 @@ class VitalMetric(_Strict):                                             # sos-v0
     measured_at: Optional[str]      # last NEW measurement of this metric (carry-forward excluded)
     age_seconds: Optional[float]
     status: Literal["ok", "stale", "missing"]
+    note: Optional[Literal["Not measured by camera scan"]] = None    # §8.6: camera scan cannot measure it
+
+
+class ScanContext(_Strict):                                             # §8.6 addition
+    label: Literal["Live camera measurement (experimental)"]
+    data_origin: Literal["camera_scan"]
+    scan_id: Optional[str]
+    scanned_at: Optional[str]
+    age_seconds: Optional[float]
+    heart_rate_bpm: Optional[float]          # null when the scan judged it unreliable
+    heart_quality: Optional[float]           # signal quality 0..1
+    breathing_brpm: Optional[float]
+    breathing_quality: Optional[float]
+    reaction_median_ms: Optional[float]
+    verdict: Optional[str]
+    scan_grade: Optional[str]
+    notes: list[str] = Field(default_factory=list)
+
+
+class UsedReading(_Strict):                                             # §8.6 addition
+    reading_id: str
+    timestamp: Optional[str]
+    data_origin: Optional[str]
+    measurement_origin: Optional[str]
+    first_used_at: str
+
+
+class LiveData(_Strict):                                                # §8.6 addition: live camera data only
+    label: Literal["Live camera measurement (experimental)"]
+    readings: list[UsedReading]
+    scans: list[ScanContext]
+
+
+class OtherData(_Strict):                                               # §8.6 addition: never live
+    label: Literal["Replayed demo or simulated data (not a live measurement)"]
+    readings: list[UsedReading]
 
 
 class VitalsSnapshot(_Strict):
@@ -229,6 +273,8 @@ class GroundReport(_Strict):                                            # sos-v2
     step_id: Optional[str]
     at: str
     text: Literal["Reported to flight surgeon"]
+    live_data: Optional["LiveData"] = None         # §8.6
+    other_data: Optional["OtherData"] = None       # §8.6
 
 
 class StepDone(_Strict):                                                # sos-v0 addition
@@ -266,6 +312,9 @@ class SosSession(_Strict):
     steps_done: list[StepDone] = Field(default_factory=list)
     score_reasons: list[str] = Field(default_factory=list)
     alert: Optional[SosAlert] = None
+    scan_context: Optional[ScanContext] = None     # §8.6: this crew's latest camera scan (experimental)
+    live_data: Optional[LiveData] = None           # §8.6: live readings + scans used in this session
+    other_data: Optional[OtherData] = None         # §8.6: replayed / simulated readings used, kept apart
     events: list[dict] = Field(default_factory=list)   # append-only log: seq, at, action, actor, state_from, state_to, …
 
 
@@ -413,11 +462,35 @@ class Sleep(_Strict):
     in_bed_minutes: Optional[float]
     vs_baseline: Optional[float]
     in_bed_hr_median: Optional[float] = None      # M5: median HR over the night's in-bed readings
+    # live crews: sleep is the scan page's self-reported sleep_hours, not an estimate from readings
+    source: Literal["in_bed_estimate", "self_report"] = "in_bed_estimate"
+    self_report_hours: Optional[float] = None
+    self_report_vs_baseline_hours: Optional[float] = None   # vs median of >= 3 earlier self-reports
+
+
+class MorningTest(_Strict):
+    metric: str                                   # docking_error_pct | docking_on_target_pct | reaction_median_ms
+    value: Optional[float]
+    baseline_median: Optional[float]              # median of this crew's earlier scans (null below 3)
+    n_prior: int
+    vs_baseline_pct: Optional[float]
 
 
 class MorningActivity(_Strict):
     completion_seconds: Optional[float]
     vs_baseline_pct: Optional[float]
+    source: Literal["morning_post", "scan_tests"] = "morning_post"   # live crews: the scan page's games
+    tests: list[MorningTest] = []
+
+
+class ScanVerdict(_Strict):
+    label: Literal["Scan verdict"]
+    verdict: Optional[str]                        # the scan page's own result, shown verbatim
+    readiness_score: Optional[float]
+    flags: list[str]
+    reading_id: str
+    source: Literal["scan_app"]
+    note: str
 
 
 class VitalsTrendItem(_Strict):
@@ -441,9 +514,11 @@ class EnvironmentContext(_Strict):
 class DailyReport(_Strict):
     crew_id: str
     date: str
-    duty_status: Literal["go", "caution", "rest"]
+    duty_status: Literal["ready", "caution", "rest"]
+    crew_source: Literal["synthetic", "live"] = "synthetic"
     sleep: Sleep
     morning_activity: MorningActivity
+    scan_verdict: Optional[ScanVerdict] = None    # live crews only; never changes duty_status
     vitals_trend: list[VitalsTrendItem]
     environment_context: EnvironmentContext
     watch_items: list[str]
@@ -470,13 +545,14 @@ class ModeResponse(_Strict):
 
 SosStep.model_rebuild()
 SosAlert.model_rebuild()
+GroundReport.model_rebuild()
 
 
 # ---------- admin replay (demo feed until M1; every reading goes through core Engine.update) ----------
 class ReplayRequest(_Request):
     file: str                                   # a .csv inside data/ ("qr_scan_demo_clean.csv" or "data/...")
     speed: float = Field(default=60.0, gt=0, le=1_000_000)   # × real time: 60 -> a 5-min gap takes 5 s
-    reset: bool = True                          # clear the live Engine first
+    reset: bool = True                          # clear the crews in this file first (other crews, e.g. live scans, stay)
 
 
 class ReplayStatus(_Strict):
@@ -490,3 +566,40 @@ class ReplayStatus(_Strict):
     last_status: Optional[Status]
     started_at: Optional[str]
     error: Optional[str]
+
+
+# ---------- camera scan ingest (team scan page -> live crew) ----------
+class ScanIngestResult(_Strict):
+    accepted: Literal[True]
+    duplicate: bool                             # same session_id already ingested for this crew: nothing re-scored
+    crew_id: str
+    reading_id: str
+    reading: VitalsReading
+    score: ScoreResult
+
+
+class ScanUploadResponse(_Strict):
+    accepted: int
+    results: list[ScanIngestResult]
+
+
+class CrewInfo(_Strict):
+    crew_id: str
+    source: Literal["synthetic", "live"]        # live = real camera scans; synthetic = demo playback / SIMULATED
+    data_origin: Optional[str]
+    readings: int
+    latest_reading_id: Optional[str]
+    latest_as_of: Optional[str]
+    latest_status: Optional[Status]
+    display_label: Optional[str]
+    baseline_building: Optional[BaselineBuilding] = None
+
+
+class LiveScansCleared(_Strict):
+    cleared_crews: list[str]
+    removed_records: int
+    file: str
+
+
+class CrewList(_Strict):
+    crews: list[CrewInfo]

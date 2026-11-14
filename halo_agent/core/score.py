@@ -33,6 +33,16 @@ def data_origin_of(reading: VitalsReading, cfg: ScoringConfig) -> str:
         raise ValueError(f"unknown measurement_origin {reading.measurement_origin!r}; add it to scoring.yaml")
 
 
+def check_one_kind(live: Optional[bool], reading: VitalsReading, origin: str, cfg: ScoringConfig) -> bool:
+    """A crew's readings are either all real camera data or all demo/simulated (AGENTS.md §3.6, §5): mixing
+    them would put real scans on a synthetic baseline. Returns the crew's kind; raises on a mix."""
+    kind = cfg.is_live(origin)
+    if live is not None and live != kind:
+        raise ValueError(f"{reading.crew_id} already holds {'live' if live else 'synthetic'} data; reading "
+                         f"{reading.reading_id} is {origin}. Use a separate crew_id.")
+    return kind
+
+
 def _freshness(minutes: float, cfg: ScoringConfig) -> float:
     if minutes <= cfg.fresh_full_minutes:
         return 1.0
@@ -70,24 +80,38 @@ def assemble(reading: VitalsReading, per_metric: dict[str, tuple[MetricEval, Opt
     baseline_quality = max(quals, key=QUALITY_RANK.__getitem__) if quals else "insufficient"
 
     # confidence = baseline_term × freshness_term × completeness_term   (AGENTS.md §7.5)
-    #   baseline_term     = mean over the 6 vitals of min(1, n / baseline_full_n); n = 0 without a baseline
+    #   M = the vitals this data_origin can measure (scoring.yaml measurable_metrics; default all 6)
+    #   baseline_term     = mean over M of min(1, n / baseline_full_n[origin]); n = 0 without a baseline
     #   freshness_term    = mean over present vitals of f(minutes since that vital's last NEW measurement),
     #                       f = 1 up to fresh_full_minutes, linear down to 0 at fresh_zero_minutes
-    #   completeness_term = 1 − (missing vitals / 6)
+    #   completeness_term = present vitals in M / |M|
     # With no assessable vital the product is 0, so a "normal" status with confidence 0 means "unknown".
-    b_term = sum(min(1.0, (i.baseline.n if i.baseline else 0) / cfg.baseline_full_n) for i in vit) / len(vit)
+    origin = data_origin_of(reading, cfg)
+    measurable = cfg.measurable_for(origin)
+    full_n = cfg.baseline_full_n_for(origin)
+    by_metric = {i.metric: i for i in vit}
+    b_term = sum(min(1.0, (by_metric[m].baseline.n if by_metric[m].baseline else 0) / full_n)
+                 for m in measurable) / len(measurable)
     f_term = (sum(_freshness(per_metric[m][1], cfg) for m in present) / len(present)) if present else 0.0
-    c_term = len(present) / len(VITAL_METRICS)
+    c_term = sum(m in present for m in measurable) / len(measurable)
     confidence = round(b_term * f_term * c_term, 3)
+    building = [per_metric[m][0].building_n for m in present if per_metric[m][0].building_n is not None]
+    need = cfg.min_points_for(origin)
+    baseline_building = ({"n": min(building), "needed": need, "label": f"Baseline building ({min(building)}/{need})"}
+                         if building else None)
 
     return ScoreResult(crew_id=reading.crew_id, reading_id=reading.reading_id, as_of=iso_z(reading.timestamp),
                        status=status, severity=severity, confidence=confidence, baseline_quality=baseline_quality,
-                       engine=cfg.engine, data_origin=data_origin_of(reading, cfg),
-                       indicators=indicators, reasons=reasons)
+                       engine=cfg.engine, data_origin=origin,
+                       indicators=indicators, reasons=reasons, baseline_building=baseline_building)
 
 
 def _score_crew(seq: list[VitalsReading], cfg: ScoringConfig) -> list[ScoreResult]:
     n = len(seq)
+    live = None
+    for r in seq:
+        live = check_one_kind(live, r, data_origin_of(r, cfg), cfg)
+    need = {k: cfg.min_points_for(data_origin_of(r, cfg)) for k, r in enumerate(seq)}
     freeze_at = next((k for k, r in enumerate(seq) if not r.in_baseline_phase), n)
     first_seen = {m: next((k for k, r in enumerate(seq) if r.value(m) is not None), n) for m in VITAL_METRICS}
     new = {m: [is_new_measurement(seq[k], m, k > first_seen[m], seq[k - 1].value(m) if k else None, cfg)
@@ -102,13 +126,14 @@ def _score_crew(seq: list[VitalsReading], cfg: ScoringConfig) -> list[ScoreResul
         for k in range(min(j, freeze_at)):
             if new[m][k]:
                 pool.setdefault(seq[k].activity, []).append(seq[k].value(m))
-        baseline, quality = select_baseline(pool, seq[j].activity, m, cfg)
+        baseline, quality, avail = select_baseline(pool, seq[j].activity, m, cfg, need[j])
         prev = next((k for k in range(j - 1, -1, -1) if new[m][k]), None)
         prev_streak = eval_at(m, prev).alert_streak if prev is not None else 0
         hist = [(seq[k].timestamp, seq[k].value(m)) for k in range(j + 1)
                 if new[m][k] and seq[k].activity == seq[j].activity]
         pts = window_points(hist, seq[j].timestamp, cfg)
         memo[(m, j)] = ev = evaluate_new(seq[j], m, baseline, quality, prev_streak, pts, cfg)
+        ev.building_n = None if baseline else avail
         return ev
 
     out = []

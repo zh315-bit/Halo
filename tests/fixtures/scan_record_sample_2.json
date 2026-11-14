@@ -1,0 +1,471 @@
+{
+  "session_id": "b83fdff6-ebcf-4063-a6e2-7ed25e74f3fe",
+  "created_at": "2026-11-14T22:58:49.106Z",
+  "app_version": "0.9.0",
+  "mode": "standard",
+  "heart_bpm": null,
+  "heart_quality": 0.2,
+  "heart_confidence": 0.18,
+  "heart_method": "chrom",
+  "heart_region": "all",
+  "heart_min_bpm": null,
+  "heart_max_bpm": null,
+  "heart_trend_bpm_per_min": null,
+  "hrv_rmssd_ms": null,
+  "hrv_sdnn_ms": null,
+  "beat_irregularity_pct": null,
+  "breathing_brpm": null,
+  "breathing_quality": 0.3,
+  "breathing_source": null,
+  "breathing_interval_cv_pct": null,
+  "blink_rate_per_min": 9.3,
+  "mean_blink_ms": 87,
+  "long_closures": 0,
+  "perclos_pct": 0,
+  "yawns": 0,
+  "reaction_median_ms": 441,
+  "reaction_lapses": 0,
+  "reaction_false_starts": 0,
+  "reaction_trials": 6,
+  "gonogo_hit_rate_pct": 100,
+  "gonogo_false_alarms": 0,
+  "gonogo_median_rt_ms": 620,
+  "memory_span": null,
+  "heart_task_bpm": null,
+  "heart_recovery_bpm": null,
+  "expression_label": "neutral",
+  "smile_pct": 0,
+  "brow_furrow_pct": 0,
+  "mood_label": "neutral",
+  "mood_valence": -5,
+  "self_mood": 4,
+  "docking_error_pct": 3.2,
+  "docking_on_target_pct": 99.6,
+  "docking_docked": true,
+  "sleep_hours": 7,
+  "self_alertness": 5,
+  "scan_seconds": 45,
+  "frames": 2880,
+  "motion_pct": 0.1,
+  "scan_grade": "C",
+  "reference_heart_bpm": null,
+  "reference_breathing_brpm": null,
+  "heart_error_bpm": null,
+  "heart_task_delta_bpm": null,
+  "heart_recovery_delta_bpm": null,
+  "breathing_error_brpm": null,
+  "ml_unusual_moments": 3,
+  "ml_check_score": null,
+  "ml_check_unusual": null,
+  "verdict": "caution",
+  "readiness_score": 82,
+  "flags": [
+    "3 unusual moments during the scan (model)"
+  ],
+  "notes": [
+    "heart rate not reliable enough to report",
+    "breathing rate not reliable enough to report"
+  ],
+  "details": {
+    "score_parts": {
+      "alertness": 100,
+      "cognitive": 53,
+      "sleep": 100
+    },
+    "deviations": {
+      "heart_bpm": null,
+      "breathing_brpm": null,
+      "reaction_median_ms": null,
+      "blink_rate_per_min": null
+    },
+    "scan_issues": [
+      "low frame rate (20 per second)",
+      "weak pulse signal"
+    ],
+    "candidates": [
+      {
+        "region": "forehead",
+        "method": "pos",
+        "bpm": 80.5,
+        "quality": 0.1
+      },
+      {
+        "region": "forehead",
+        "method": "chrom",
+        "bpm": 80.5,
+        "quality": 0.08
+      },
+      {
+        "region": "forehead",
+        "method": "green",
+        "bpm": 71.5,
+        "quality": 0.12
+      },
+      {
+        "region": "left",
+        "method": "pos",
+        "bpm": 75,
+        "quality": 0.13
+      },
+      {
+        "region": "left",
+        "method": "chrom",
+        "bpm": 83,
+        "quality": 0.12
+      },
+      {
+        "region": "left",
+        "method": "green",
+        "bpm": 64.5,
+        "quality": 0.14
+      },
+      {
+        "region": "right",
+        "method": "pos",
+        "bpm": 50.5,
+        "quality": 0.14
+      },
+      {
+        "region": "right",
+        "method": "chrom",
+        "bpm": 74.5,
+        "quality": 0.15
+      },
+      {
+        "region": "right",
+        "method": "green",
+        "bpm": 50.5,
+        "quality": 0.15
+      },
+      {
+        "region": "all",
+        "method": "pos",
+        "bpm": 74.5,
+        "quality": 0.17
+      },
+      {
+        "region": "all",
+        "method": "chrom",
+        "bpm": 74,
+        "quality": 0.2
+      },
+      {
+        "region": "all",
+        "method": "green",
+        "bpm": 92,
+        "quality": 0.18
+      }
+    ],
+    "heart_series": [
+      {
+        "t": 5,
+        "bpm": 51,
+        "quality": 0.27
+      },
+      {
+        "t": 6,
+        "bpm": 50,
+        "quality": 0.23
+      },
+      {
+        "t": 7,
+        "bpm": 49,
+        "quality": 0.23
+      },
+      {
+        "t": 8,
+        "bpm": 49,
+        "quality": 0.23
+      },
+      {
+        "t": 9,
+        "bpm": 49,
+        "quality": 0.29
+      },
+      {
+        "t": 10,
+        "bpm": 50,
+        "quality": 0.38
+      },
+      {
+        "t": 11,
+        "bpm": 50,
+        "quality": 0.39
+      },
+      {
+        "t": 12,
+        "bpm": 51,
+        "quality": 0.38
+      },
+      {
+        "t": 13,
+        "bpm": 51,
+        "quality": 0.34
+      },
+      {
+        "t": 14,
+        "bpm": 77,
+        "quality": 0.32
+      },
+      {
+        "t": 15,
+        "bpm": 77,
+        "quality": 0.4
+      },
+      {
+        "t": 16,
+        "bpm": 76,
+        "quality": 0.38
+      },
+      {
+        "t": 17,
+        "bpm": 74,
+        "quality": 0.37
+      },
+      {
+        "t": 18,
+        "bpm": 73,
+        "quality": 0.39
+      },
+      {
+        "t": 19,
+        "bpm": 73,
+        "quality": 0.4
+      },
+      {
+        "t": 20,
+        "bpm": 74,
+        "quality": 0.38
+      },
+      {
+        "t": 21,
+        "bpm": 75,
+        "quality": 0.35
+      },
+      {
+        "t": 22,
+        "bpm": 75,
+        "quality": 0.31
+      },
+      {
+        "t": 23,
+        "bpm": 75,
+        "quality": 0.31
+      },
+      {
+        "t": 24,
+        "bpm": 75,
+        "quality": 0.32
+      },
+      {
+        "t": 25,
+        "bpm": 76,
+        "quality": 0.32
+      },
+      {
+        "t": 26,
+        "bpm": 82,
+        "quality": 0.33
+      },
+      {
+        "t": 27,
+        "bpm": 83,
+        "quality": 0.3
+      },
+      {
+        "t": 28,
+        "bpm": 83,
+        "quality": 0.2
+      },
+      {
+        "t": 29,
+        "bpm": 70,
+        "quality": 0.32
+      },
+      {
+        "t": 30,
+        "bpm": 71,
+        "quality": 0.37
+      },
+      {
+        "t": 31,
+        "bpm": 73,
+        "quality": 0.4
+      },
+      {
+        "t": 32,
+        "bpm": 74,
+        "quality": 0.41
+      },
+      {
+        "t": 33,
+        "bpm": 76,
+        "quality": 0.37
+      },
+      {
+        "t": 34,
+        "bpm": 79,
+        "quality": 0.34
+      },
+      {
+        "t": 35,
+        "bpm": 80,
+        "quality": 0.36
+      },
+      {
+        "t": 36,
+        "bpm": 80,
+        "quality": 0.34
+      },
+      {
+        "t": 37,
+        "bpm": 78,
+        "quality": 0.34
+      },
+      {
+        "t": 38,
+        "bpm": 77,
+        "quality": 0.35
+      },
+      {
+        "t": 39,
+        "bpm": 77,
+        "quality": 0.35
+      }
+    ],
+    "breathing": {
+      "chest": {
+        "brpm": 12,
+        "quality": 0.29,
+        "seconds": 44.9
+      },
+      "from_beats": null,
+      "agree": null,
+      "estimates": [
+        {
+          "name": "chest",
+          "brpm": 12,
+          "quality": 0.29
+        },
+        {
+          "name": "head",
+          "brpm": 11,
+          "quality": 0.33
+        }
+      ],
+      "breaths": 8,
+      "interval_cv_pct": 56.8,
+      "longest_gap_s": 11.7
+    },
+    "tests": {
+      "reaction": {
+        "trials": 6,
+        "median_ms": 441,
+        "mean_ms": 446,
+        "fastest_ms": 420,
+        "slowest_ms": 486,
+        "lapses": 0,
+        "false_starts": 0,
+        "misses": 0
+      },
+      "gonogo": {
+        "trials": 12,
+        "hits": 8,
+        "misses": 0,
+        "false_alarms": 0,
+        "hit_rate_pct": 100,
+        "false_alarm_rate_pct": 0,
+        "median_rt_ms": 620,
+        "rt_variability_ms": 93
+      },
+      "docking": {
+        "samples": 2871,
+        "mean_error_pct": 3.2,
+        "time_on_target_pct": 99.6,
+        "final_error_pct": 4,
+        "time_to_first_lock_s": 0,
+        "steadiness_pct": 1.5,
+        "docked": true
+      },
+      "mission": {
+        "points": 2412,
+        "best_streak": 19,
+        "game_version": 2
+      }
+    },
+    "settings": {
+      "mode": "standard",
+      "method": "auto",
+      "camera": "user",
+      "overlay": true,
+      "validation": false,
+      "keepCamera": true,
+      "sound": true
+    },
+    "expression": {
+      "frames": 884,
+      "label": "neutral",
+      "now": "neutral",
+      "valence": -5,
+      "shares": {
+        "smiling": 0,
+        "tense": 0,
+        "frowning": 0,
+        "surprised": 0,
+        "neutral": 100
+      },
+      "expressiveness": 0.01
+    },
+    "ml": {
+      "model": "isolation forest",
+      "windows": 44,
+      "moments": [
+        {
+          "t": 1,
+          "score": 0.77,
+          "driver": "pulse strength",
+          "direction": "high"
+        },
+        {
+          "t": 2,
+          "score": 0.69,
+          "driver": "pulse strength",
+          "direction": "high"
+        },
+        {
+          "t": 3,
+          "score": 0.65,
+          "driver": "pulse strength",
+          "direction": "high"
+        }
+      ],
+      "check": {
+        "score": null,
+        "n": 1,
+        "needed": 8
+      }
+    },
+    "trends": {
+      "Reaction time": {
+        "label": "not enough checks yet",
+        "n": 2,
+        "change_pct": null
+      },
+      "Docking error": {
+        "label": "not enough checks yet",
+        "n": 2,
+        "change_pct": null
+      },
+      "Memory span": {
+        "label": "not enough checks yet",
+        "n": 0,
+        "change_pct": null
+      },
+      "Readiness score": {
+        "label": "not enough checks yet",
+        "n": 2,
+        "change_pct": null
+      }
+    }
+  }
+}

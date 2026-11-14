@@ -61,6 +61,8 @@ def snapshot(reading, stale_after_s: float = STALE_AFTER_S) -> dict:
     """core.LatestReading (or a dict with the same keys) -> the §6.4 vitals_snapshot."""
     if reading is None or not _get(reading, "reading_id"):
         return empty_snapshot()
+    from .live import LIVE_LABEL, NOT_BY_CAMERA, NOT_BY_CAMERA_TEXT, is_camera
+    camera = is_camera(reading)
     measured = _get(reading, "measured_at") or {}
     ages = _get(reading, "metric_age_seconds") or {}
     metrics = {}
@@ -68,6 +70,8 @@ def snapshot(reading, stale_after_s: float = STALE_AFTER_S) -> dict:
         v = _get(reading, m)
         if v is None or (isinstance(v, float) and v != v):     # None or NaN
             metrics[m] = {"value": None, "measured_at": None, "age_seconds": None, "status": "missing"}
+            if camera and m in NOT_BY_CAMERA:
+                metrics[m]["note"] = NOT_BY_CAMERA_TEXT
             continue
         age = ages.get(m)
         status = "stale" if age is None or age > stale_after_s else "ok"   # unknown age is never "ok"
@@ -76,8 +80,9 @@ def snapshot(reading, stale_after_s: float = STALE_AFTER_S) -> dict:
     age = _get(reading, "age_seconds")
     return {"reading_id": _get(reading, "reading_id"), "timestamp": _iso(_get(reading, "timestamp")),
             "age_seconds": None if age is None else round(float(age)),
-            "display_label": _get(reading, "display_label") or None,
-            "data_origin": _origin(_get(reading, "measurement_origin")),
+            "display_label": _get(reading, "display_label") or (LIVE_LABEL if camera else None),
+            "data_origin": "camera_scan" if camera else (_get(reading, "data_origin")
+                                                         or _origin(_get(reading, "measurement_origin"))),
             "stale": age is None or float(age) > stale_after_s, "metrics": metrics}
 
 

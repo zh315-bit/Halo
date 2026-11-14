@@ -26,15 +26,17 @@ def robust_baseline(values: list[float], group: str, metric: str, cfg: ScoringCo
     return Baseline(median=med, sigma=sigma, n=len(values), group=group)
 
 
-def select_baseline(pool: dict[str, list[float]], activity: str, metric: str,
-                    cfg: ScoringConfig) -> tuple[Optional[Baseline], str]:
-    """pool: activity -> eligible values. Returns (baseline or None, quality)."""
+def select_baseline(pool: dict[str, list[float]], activity: str, metric: str, cfg: ScoringConfig,
+                    min_points: Optional[int] = None) -> tuple[Optional[Baseline], str, int]:
+    """pool: activity -> eligible values (this crew only). min_points defaults to cfg.min_points (live camera
+    crews pass cfg.min_points_for("camera_scan")). Returns (baseline or None, quality, points available)."""
+    need = cfg.min_points if min_points is None else min_points
     own = pool.get(activity, [])
-    if len(own) >= cfg.min_points:
-        return robust_baseline(own, activity, metric, cfg), "ok"
+    if len(own) >= need:
+        return robust_baseline(own, activity, metric, cfg), "ok", len(own)
     if metric in cfg.no_pool_metrics:
-        return None, "insufficient"
+        return None, "insufficient", len(own)
     pooled = [v for vs in pool.values() for v in vs]
-    if len(pooled) >= cfg.min_points:
-        return robust_baseline(pooled, POOLED, metric, cfg), "partial"
-    return None, "insufficient"
+    if len(pooled) >= need:
+        return robust_baseline(pooled, POOLED, metric, cfg), "partial", len(pooled)
+    return None, "insufficient", len(pooled)
