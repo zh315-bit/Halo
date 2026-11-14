@@ -187,3 +187,28 @@ def test_smoke_scan_scenario_passes_with_a_scan_endpoint(env, capsys):
 def test_smoke_scan_scenario_passes_with_endpoint(env):
     smoke = _smoke()
     smoke.scan(env["c"])          # main now provides POST /api/v1/scan: the scenario must run, not skip
+
+
+def test_posted_scan_reaches_the_sos_end_to_end(client, tmp_path, monkeypatch):
+    """Real path, no fakes: POST /api/v1/scan -> core Engine -> latest_reading / latest_scan -> SOS session."""
+    from halo_agent import core
+    from halo_agent.config_loader import load_scoring_config
+    monkeypatch.delenv("ALERT_MODE", raising=False)
+    old = core.get_engine()
+    core.set_engine(core.Engine(load_scoring_config()))
+    routes_sos.set_service(service_mod.SosService(log=SessionLog(tmp_path), mode_fn=routes_admin.current_mode))
+    try:
+        r = client.post("/api/v1/scan", json={"crew_id": "LIVE_E2E", "record": RECORD})
+        assert r.status_code == 200, r.text
+        rid = r.json()["reading_id"]
+        s = client.post("/api/v1/sos", json={"crew_id": "LIVE_E2E", "symptom": "other"}).json()
+        v = s["vitals_snapshot"]
+        assert v["reading_id"] == rid and v["data_origin"] == "camera_scan"
+        assert v["metrics"]["spo2_pct"]["note"] == "Not measured by camera scan"
+        assert v["metrics"]["resp_rate_bpm"]["value"] == RECORD["breathing_brpm"]
+        assert s["scan_context"]["scan_id"] == RECORD["session_id"] and s["scan_context"]["verdict"] == RECORD["verdict"]
+        assert [x["reading_id"] for x in s["live_data"]["readings"]] == [rid] and s["other_data"] is None
+        assert s["score"] is None or s["score"]["reading_id"] == rid
+    finally:
+        core.set_engine(old)
+        routes_sos.set_service(None)
