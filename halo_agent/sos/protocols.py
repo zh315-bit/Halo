@@ -44,7 +44,8 @@ VITAL_METRICS = ("heart_rate_bpm", "resp_rate_bpm", "systolic_bp_mmhg", "diastol
 DEFAULT_DIR = Path(__file__).resolve().parents[2] / "config" / "checklists"
 SOURCES_FILE = "_sources.yaml"
 _STEP_KEYS = {"id", "type", "text", "source", "ref", "note", "env", "adaptation", "gravity_dependent", "next",
-              "on_cannot_do", "on_condition_changed"}
+              "on_cannot_do", "on_condition_changed", "level"}
+LEVELS = ("urgent", "report")
 _TOP_KEYS = {"protocol_id", "symptom", "title", "review_status", "verified", "show_vitals", "red_flags", "start",
              "scope_note", "scope_source", "escalate_if_unresolved_after", "source", "steps"}
 
@@ -82,6 +83,7 @@ class Step:
     next: str                          # step id | END
     on_cannot_do: str                  # step id | escalate | END
     on_condition_changed: Optional[str]  # step id | escalate | END | None (= stay on this step)
+    level: Optional[str] = None        # escalate steps: urgent (default) | report (log for ground, no SMS)
 
     @property
     def has_source(self) -> bool:
@@ -249,9 +251,15 @@ def parse_checklist(data: dict, sources: dict[str, Source], path: str = "<dict>"
             occ = target(occ, sid, "on_condition_changed")
         elif typ == "check":
             bad(f"step {sid}: a check step needs `on_condition_changed` (where a warning sign leads)")
+        level = s.get("level")
+        if level is not None and level not in LEVELS:
+            bad(f"step {sid}: level must be one of {LEVELS}")
+        if level is not None and typ != "escalate":
+            bad(f"step {sid}: `level` only applies to escalate steps")
         steps.append(Step(sid, typ, text, keys, _str_or_none(s.get("ref"), f"step {sid}: ref", bad),
                           _str_or_none(s.get("note"), f"step {sid}: note", bad), env,
-                          _str_or_none(s.get("adaptation"), f"step {sid}: adaptation", bad), gd, nxt, cd, occ))
+                          _str_or_none(s.get("adaptation"), f"step {sid}: adaptation", bad), gd, nxt, cd, occ,
+                          level))
 
     start = data.get("start") or ids[0]
     if start not in idset:

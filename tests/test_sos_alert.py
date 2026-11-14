@@ -8,9 +8,19 @@ from halo_agent.api import routes_admin, routes_sos
 from halo_agent.notify import TwilioSender
 from halo_agent.sos import service as service_mod
 from halo_agent.sos.session_log import SessionLog
-from halo_agent.sos.vitals import CsvReplayVitals, load_rows
 
-ROWS = load_rows()
+READING = {   # shape of core.LatestReading (values from QR_DEMO_0276)
+    "reading_id": "QR_DEMO_0276", "crew_id": "CREW_01", "timestamp": "2026-11-16T09:05:00Z",
+    "heart_rate_bpm": 100.0, "resp_rate_bpm": 20.0, "systolic_bp_mmhg": 189.0, "diastolic_bp_mmhg": 72.0,
+    "body_temp_c": 37.3, "spo2_pct": 98.0, "blink_rate_per_min": None,
+    "measurement_origin": "master_csv_playback_not_camera", "display_label": "Demo data - not measured from your camera",
+    "measured_at": {"heart_rate_bpm": "2026-11-16T09:05:00Z", "resp_rate_bpm": "2026-11-16T09:00:00Z",
+                    "systolic_bp_mmhg": "2026-11-16T09:00:00Z", "diastolic_bp_mmhg": "2026-11-16T09:00:00Z",
+                    "body_temp_c": "2026-11-16T08:00:00Z", "spo2_pct": "2026-11-16T09:00:00Z"},
+    "metric_age_seconds": {"heart_rate_bpm": 0, "resp_rate_bpm": 300, "systolic_bp_mmhg": 300,
+                           "diastolic_bp_mmhg": 300, "body_temp_c": 3900, "spo2_pct": 300},
+    "age_seconds": 0,
+}
 TWILIO_ENV = {"TWILIO_ACCOUNT_SID": "ACtest", "TWILIO_AUTH_TOKEN": "tok", "TWILIO_FROM_NUMBER": "+15550000001",
               "MISSION_SUPPORT_NUMBER": "+15550000002"}
 
@@ -37,7 +47,7 @@ def make(tmp_path, monkeypatch, client):
         monkeypatch.setenv("ALERT_MODE", alert_mode)
         fake = fake or FakeTwilio()
         svc = service_mod.SosService(
-            vitals=CsvReplayVitals(ROWS, clock=lambda: ROWS[-1]["ts"]), score_fn=lambda c: None,
+            reading_fn=lambda c: READING, score_fn=lambda c: None,
             log=SessionLog(tmp_path), mode_fn=routes_admin.current_mode,
             twilio=TwilioSender(client_factory=fake.factory, env=env))
         routes_sos.set_service(svc)

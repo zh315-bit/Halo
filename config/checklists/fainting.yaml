@@ -89,6 +89,7 @@ steps:
     text: "Report the event to the flight surgeon, even if they recovered."
     source: nasa_medcl
     note: "Escalation type 'report' – non-urgent. Team to decide if this should be a lower priority than an emergency alert."
+    level: report  # team decision 2026-11-14: logged for the flight surgeon, no SMS
     next: END
     on_cannot_do: escalate
   - id: f_cpr

@@ -1,0 +1,10 @@
+# Proactive nudge (AGENTS.md §8.5). Suggestions are DERIVED from the checklists' red_flags; this file only orders
+# them. Every symptom listed under a red flag must already list that red flag in its checklist (checked at load),
+# so this file cannot add a new red-flag -> checklist link (no new medical content).
+
+priority:                  # red flag rule_id -> checklists, best first; unlisted matches follow in file order
+  spo2_low: [breathing_difficulty, chest_pain]
+  bp_crisis: [chest_pain]
+max_suggestions: 2         # checklist suggestions from red flags; `other` is always added last
+min_interval_s: 300        # team_derived: at most one new nudge per crew member in this window
+snooze_minutes: [5, 15, 30]

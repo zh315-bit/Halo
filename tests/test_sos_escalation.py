@@ -8,7 +8,6 @@ import yaml
 from halo_agent.sos import service as service_mod
 from halo_agent.sos.escalation import CONFIG, RULES, EscalationConfigError, load_config, parse_config
 from halo_agent.sos.session_log import SessionLog
-from halo_agent.sos.vitals import CsvReplayVitals, load_rows
 
 RAW = yaml.safe_load(CONFIG.read_text(encoding="utf-8"))
 
@@ -37,8 +36,7 @@ def test_bad_config_is_refused(mutate):
 def test_toggle_off_cannot_do(tmp_path):
     d = copy.deepcopy(RAW)
     d["rules"]["cannot_do"] = False
-    rows = load_rows()
-    svc = service_mod.SosService(vitals=CsvReplayVitals(rows, clock=lambda: rows[-1]["ts"]), score_fn=lambda c: None,
+    svc = service_mod.SosService(reading_fn=lambda c: None, score_fn=lambda c: None,
                                  log=SessionLog(tmp_path), rules=parse_config(d))
     s, _ = svc.start("CREW_01", "other")
     s, _ = svc.step(s["session_id"], "cannot_do")

@@ -36,6 +36,7 @@ TRANSITIONS: dict[tuple[str, str], str] = {
 OVERLAYS: dict[str, tuple[str, ...]] = {
     "acknowledge": (ALERTING, GUIDING, RESOLVED, HANDED_OFF),
     "escalate": (ALERTING, GUIDING),
+    "escalate_suppressed": (ALERTING, GUIDING),   # same reason inside the cooldown window
     "alert_update": STATES,
     "vitals_refresh": (GUIDING,),
     "note": STATES,

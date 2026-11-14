@@ -9,11 +9,13 @@ from fastapi import APIRouter, BackgroundTasks, HTTPException
 
 from halo_agent.shell import ask, classify
 from halo_agent.shell.llm import LLMClient, get_llm as _env_llm
+from halo_agent.sos.nudge import NudgeService, NudgeStateError, UnknownNudge
 from halo_agent.sos.service import DISCLAIMER, SosService, UnknownSession
 from halo_agent.sos.state_machine import IllegalTransition
 
 from .routes_admin import current_mission_env, current_mode
-from .schemas import (AskRequest, AskResponse, ClassifyRequest, ClassifyResponse, ProblemType, SosAckRequest,
+from .schemas import (AskRequest, AskResponse, ClassifyRequest, ClassifyResponse, GroundReport, Nudge, NudgeAccepted,
+                      NudgeAcceptRequest, NudgeList, NudgeSnoozeRequest, ProblemType, SosAckRequest,
                       SosConfirmRequest, SosResolveRequest, SosSession, SosStartRequest, SosStepRequest)
 
 router = APIRouter(prefix="/api/v1", tags=["sos"])
@@ -30,8 +32,18 @@ def get_service() -> SosService:
 
 
 def set_service(svc: Optional[SosService]) -> None:
-    global _service
-    _service = svc
+    global _service, _nudges
+    _service, _nudges = svc, None
+
+
+_nudges: Optional[NudgeService] = None
+
+
+def get_nudges() -> NudgeService:
+    global _nudges
+    if _nudges is None or _nudges.sos is not get_service():
+        _nudges = NudgeService(get_service())
+    return _nudges
 
 
 _llm: Optional[LLMClient] = None
@@ -52,6 +64,10 @@ def _run(fn, *args, **kw):
         return fn(*args, **kw)
     except UnknownSession as e:
         raise HTTPException(404, f"unknown session {e.args[0]}")
+    except UnknownNudge as e:
+        raise HTTPException(404, f"unknown nudge {e.args[0]}")
+    except NudgeStateError as e:
+        raise HTTPException(409, str(e))
     except IllegalTransition as e:
         raise HTTPException(409, str(e))
     except ValueError as e:
@@ -66,6 +82,12 @@ def _schedule(bg: BackgroundTasks, jobs) -> None:
 @router.get("/sos/problem-types", response_model=list[ProblemType])
 def sos_problem_types() -> list[dict]:
     return get_service().problem_types()
+
+
+@router.get("/sos/ground-reports", response_model=list[GroundReport])
+def sos_ground_reports() -> list[dict]:
+    """level=report escalations (e.g. fainting f7): logged for the flight surgeon, never texted."""
+    return list(get_service().ground_reports)
 
 
 @router.post("/sos", response_model=SosSession)
@@ -132,3 +154,29 @@ def agent_ask(req: AskRequest) -> dict:
               if c == step.get("id") else []} for c in out["citations"]]
     return {**out, "citations": cites,
             "session_id": req.session_id, "mode": mode, "disclaimer": DISCLAIMER}
+
+
+# ---------- §8.5 proactive nudge ----------
+@router.get("/crew/{crew_id}/nudges", response_model=NudgeList)
+def crew_nudges(crew_id: str) -> dict:
+    """Poll this: evaluates the latest score and returns the active nudges (created on the transition to alert)."""
+    return {"crew_id": crew_id, "nudges": get_nudges().evaluate(crew_id)}
+
+
+@router.post("/nudges/{nudge_id}/snooze", response_model=Nudge)
+def nudge_snooze(nudge_id: str, req: NudgeSnoozeRequest) -> dict:
+    return _run(get_nudges().snooze, nudge_id, req.minutes)
+
+
+@router.post("/nudges/{nudge_id}/dismiss", response_model=Nudge)
+def nudge_dismiss(nudge_id: str) -> dict:
+    return _run(get_nudges().dismiss, nudge_id)
+
+
+@router.post("/nudges/{nudge_id}/accept", response_model=NudgeAccepted)
+def nudge_accept(nudge_id: str, req: NudgeAcceptRequest, bg: BackgroundTasks) -> dict:
+    """Open one suggested checklist: starts an SOS session for that crew member (mission support is alerted)."""
+    n, session, jobs = _run(get_nudges().accept, nudge_id, req.symptom)
+    _schedule(bg, jobs)
+    return {"nudge": n, "session": session}
+

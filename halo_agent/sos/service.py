@@ -1,7 +1,8 @@
 """SOS orchestration: state machine + checklists + vitals + optional score + alert senders + session log.
 
-No LLM here. Score comes only from `halo_agent.core.score_latest`; if it is missing or returns None the
-session carries `score: null` and the flow continues.
+No LLM here. Vitals come only from `halo_agent.core.latest_reading` and the score only from
+`halo_agent.core.score_latest` (the same live Engine); the score is shown only if it belongs to the displayed
+reading (same reading_id), otherwise `score: null`. Either may be missing; the flow continues.
 """
 
 from __future__ import annotations
@@ -21,7 +22,8 @@ from .mission_env import configured_env
 from .protocols import END, Checklist, load_all
 from .session_log import SessionLog
 from .state_machine import STEP_ACTIONS, TERMINAL, Session
-from .vitals import CsvReplayVitals
+from .vitals import as_dict as _as_dict
+from .vitals import default_reading_fn, snapshot
 
 DISCLAIMER = "Decision support only. Not a diagnosis."
 END_TEXT = "Checklist complete. Choose Resolved or Hand off."
@@ -45,16 +47,11 @@ def _utc_now() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def _as_dict(obj) -> Optional[dict]:
-    if obj is None:
-        return None
-    if isinstance(obj, dict):
-        return obj
-    if hasattr(obj, "model_dump"):
-        return obj.model_dump()
-    if dataclasses.is_dataclass(obj):
-        return dataclasses.asdict(obj)
-    return None
+def _ts(iso: str) -> float:
+    return datetime.fromisoformat(iso.replace("Z", "+00:00")).timestamp()
+
+
+REPORTED_TEXT = "Reported to flight surgeon"
 
 
 def default_score_fn(crew_id: str) -> Optional[dict]:
@@ -70,19 +67,21 @@ def default_score_fn(crew_id: str) -> Optional[dict]:
 
 
 class SosService:
-    def __init__(self, checklists: Optional[dict[str, Checklist]] = None, vitals=None,
+    def __init__(self, checklists: Optional[dict[str, Checklist]] = None,
+                 reading_fn: Callable[[str], object] = default_reading_fn,
                  score_fn: Callable[[str], Optional[dict]] = default_score_fn,
                  log: Optional[SessionLog] = None, rules: Optional[esc.EscalationConfig] = None,
                  mode_fn: Callable[[], str] = lambda: "online", now_fn: Callable[[], str] = _utc_now,
                  env_fn: Callable[[], str] = configured_env,
                  twilio: Optional[TwilioSender] = None):
         self.checklists = checklists if checklists is not None else load_all()
-        self.vitals = vitals if vitals is not None else CsvReplayVitals()
+        self.reading_fn = reading_fn
         self.score_fn, self.mode_fn, self.now, self.env_fn = score_fn, mode_fn, now_fn, env_fn
         self.log = log or SessionLog()
         self.rules = rules if rules is not None else esc.load_config()
         self.dry_run, self.queue, self.twilio = DryRunSender(), QueueSender(), twilio or TwilioSender()
         self.sessions: dict[str, Session] = {}
+        self.ground_reports: list[dict] = []     # level=report escalations: logged for ground, never texted
         self._ctx: dict[str, dict] = {}          # session_id -> {vitals, score, messages, reasons, logged}
         self._lock = threading.RLock()
 
@@ -111,8 +110,9 @@ class SosService:
             s.report(at, actor)
             s.start_alert(at)                       # alert first, but delivery never blocks guidance
             self._refresh(s)
-            jobs = self._escalate(s, ["sos_reported"] + self._context_reasons(s), at)
-            jobs += self._escalate(s, s.start_guide(at), at)
+            opening = ["sos_reported"] + self._context_reasons(s)
+            opening += s.start_guide(at)            # e.g. escalate_step:c0
+            jobs = self._escalate(s, opening, at, combine=True)   # one opening message, all reasons in it
             self._persist(s)
             return self.view(s), jobs
 
@@ -217,38 +217,84 @@ class SosService:
         return s
 
     def _refresh(self, s: Session) -> None:
+        """Reading and score from the same Engine, aligned on reading_id. If a new reading lands between the two
+        calls, retry; if they still disagree, show the reading and no score (never a mismatched pair)."""
         ctx = self._ctx[s.session_id]
-        ctx["vitals"] = self.vitals.snapshot(s.crew_id)
-        try:
-            ctx["score"] = self.score_fn(s.crew_id)
-        except Exception:
-            ctx["score"] = None
+        reading, score = None, None
+        for _ in range(3):
+            try:
+                reading = self.reading_fn(s.crew_id)
+            except Exception:
+                reading = None
+            try:
+                score = _as_dict(self.score_fn(s.crew_id))
+            except Exception:
+                score = None
+            snap = snapshot(reading)
+            if score is None or snap["reading_id"] == score.get("reading_id"):
+                break
+        else:
+            score = None
+        if snap["reading_id"] is None or (score is not None and score.get("reading_id") != snap["reading_id"]):
+            score = None
+        ctx["vitals"], ctx["score"] = snap, score
 
     def _brief(self, s: Session) -> Optional[dict]:
         sc = self._ctx[s.session_id].get("score")
         if not sc or sc.get("status") not in ("normal", "caution", "alert") or sc.get("severity") not in (0, 1, 2, 3):
             return None
-        return {"status": sc["status"], "severity": sc["severity"]}
+        return {"status": sc["status"], "severity": sc["severity"], "reading_id": sc.get("reading_id")}
 
     def _context_reasons(self, s: Session) -> list[str]:
         ctx = self._ctx[s.session_id]
         return esc.context_reasons(self._brief(s) and ctx["score"], ctx["vitals"], s.checklist.red_flags, self.rules)
 
-    def _escalate(self, s: Session, reasons: list[str], at: str) -> list[Callable]:
-        ctx, jobs = self._ctx[s.session_id], []
+    def _level(self, s: Session, reason: str) -> str:
+        """urgent (texted) | report (logged for ground only). escalation.yaml step_levels > checklist step level >
+        escalation.yaml rule_levels > urgent."""
+        key, _, step_id = reason.partition(":")
+        if key == "escalate_step" and step_id:
+            override = self.rules.step_levels.get(f"{s.checklist.protocol_id}.{step_id}")
+            if override:
+                return override
+            try:
+                lvl = s.checklist.step(step_id).level
+            except KeyError:
+                lvl = None
+            if lvl:
+                return lvl
+        return self.rules.rule_levels.get(key, "urgent")
+
+    def _escalate(self, s: Session, reasons: list[str], at: str, combine: bool = False) -> list[Callable]:
+        ctx = self._ctx[s.session_id]
+        urgent, last_sent = [], ctx.setdefault("last_sent", {})
         for r in reasons:
             key = r.split(":")[0]
             if not self.rules.enabled(key):
                 continue
             if (key in ONCE_ONLY or key == "red_flag") and r in ctx["reasons"]:
                 continue
+            cool = self.rules.same_reason_cooldown_s
+            if cool is not None and r in last_sent and _ts(at) - last_sent[r] < cool:
+                s.overlay("escalate_suppressed", at, "system", reason=r, cooldown_s=cool)
+                continue
             if r not in ctx["reasons"]:
                 ctx["reasons"].append(r)
+            last_sent[r] = _ts(at)
+            if self._level(s, r) == "report":
+                self._report(s, r, at)
+            else:
+                urgent.append(r)
+        groups = [urgent] if (combine and urgent) else [[r] for r in urgent]
+        jobs = []
+        for group in groups:
             msg = AlertMessage(message_id=f"{s.session_id}-m{len(ctx['messages']) + 1}", session_id=s.session_id,
-                               crew_id=s.crew_id, symptom=s.checklist.symptom, reason=r, created_at=at)
+                               crew_id=s.crew_id, symptom=s.checklist.symptom, reason=group[0], created_at=at,
+                               reasons=list(group))
             msg.body = render_body(msg)
             ctx["messages"].append(msg)
-            s.overlay("escalate", at, "system", reason=r, message_id=msg.message_id)
+            s.overlay("escalate", at, "system", reason=group[0], reasons=group if len(group) > 1 else None,
+                      message_id=msg.message_id, level="urgent")
             sender = self.queue if self.mode_fn() == "offline" else (
                 self.twilio if alert_mode() == "live" else self.dry_run)
             if sender.blocking:
@@ -257,6 +303,17 @@ class SosService:
             else:
                 self._apply(msg, sender.send(msg))
         return jobs
+
+    def _report(self, s: Session, reason: str, at: str) -> None:
+        """level=report: session log + ground report queue, no SMS (AGENTS.md §8.3)."""
+        rec = {"report_id": f"{s.session_id}-r{len(self._ctx[s.session_id].setdefault('reports', [])) + 1}",
+               "session_id": s.session_id, "crew_id": s.crew_id, "symptom": s.checklist.symptom,
+               "protocol_id": s.checklist.protocol_id, "reason": reason, "step_id": reason.partition(":")[2] or None,
+               "at": at, "text": REPORTED_TEXT}
+        self._ctx[s.session_id]["reports"].append(rec)
+        self.ground_reports.append(rec)
+        self.log.append("ground_reports", rec)
+        s.overlay("escalate", at, "system", reason=reason, level="report", report_id=rec["report_id"])
 
     def _deliver(self, msg: AlertMessage, sender) -> None:
         result = sender.send(msg)          # network IO outside the lock
@@ -302,11 +359,13 @@ class SosService:
                 "sources": [x.as_dict() for x in srcs], "ref": st.ref, "note": st.note,
                 "env": list(st.env) if st.env else None, "adaptation": st.adaptation,
                 "gravity_dependent": st.gravity_dependent,
-                "on_condition_changed_means": "warning_sign" if st.type == "check" else None}
+                "on_condition_changed_means": "warning_sign" if st.type == "check" else None,
+                "level": (self._level(s, f"escalate_step:{st.id}") if st.type == "escalate" else None)}
 
     def view(self, s: Session) -> dict:
         ctx = self._ctx[s.session_id]
         msgs: list[AlertMessage] = ctx["messages"]
+        reports = ctx.get("reports", [])
         last = msgs[-1] if msgs else None
         if last is None:
             sms_status = "not_sent"
@@ -347,9 +406,12 @@ class SosService:
                 "call_status": "not_implemented",
                 "acknowledged_at": s.acknowledged_at, "ack_by": s.ack_by,
                 "ui_message": UI_TEXT["acknowledged"] if s.acknowledged_at else UI_TEXT.get(sms_status),
-                "messages": [{"message_id": m.message_id, "reason": m.reason, "channel": m.channel,
+                "messages": [{"message_id": m.message_id, "reason": m.reason, "reasons": list(m.reasons),
+                              "level": "urgent", "channel": m.channel,
                               "state": m.state, "sender": m.sender, "sid": m.sid, "attempts": m.attempts,
                               "error": m.error, "created_at": m.created_at, "body": m.body} for m in msgs],
+                "reports": [dict(r) for r in reports],
+                "report_ui_message": REPORTED_TEXT if reports else None,
             },
             "events": [dict(e) for e in s.events],
         }
