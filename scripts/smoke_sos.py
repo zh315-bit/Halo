@@ -6,7 +6,7 @@
 
 Scenarios
   demo  CREW_01 replayed demo: start chest_pain SOS, cannot_do escalates and the checklist continues, resolve.
-  scan  POST tests/fixtures/scan_record_sample.json to /api/v1/scan as LIVE_01 (main's endpoint) -> SOS for LIVE_01
+  scan  POST tests/fixtures/scan_record_sample.json to /api/v1/scan as LIVE_01 (LIVE_SMOKE with --url) -> SOS
         -> vitals come from camera_scan, SpO2 / BP / temp are `missing` with "Not measured by camera scan", the
         scan_context is labelled "Live camera measurement (experimental)", live_data lists the reading.
         SKIPPED (not failed) while /api/v1/scan does not exist yet.
@@ -55,8 +55,8 @@ def check(cond, msg):
 
 
 def scan_body(record: dict, crew_id: str) -> dict:
-    """Assumed /api/v1/scan request: the scan page's record plus crew_id (request models ignore extra fields)."""
-    return {**record, "crew_id": crew_id}
+    """POST /api/v1/scan request body (main, AGENTS.md §8.6): {"crew_id", "record"}."""
+    return {"crew_id": crew_id, "record": record}
 
 
 def demo(c):
@@ -70,15 +70,17 @@ def demo(c):
     check(s["state"] == "RESOLVED", "session resolved")
 
 
-def scan(c):
+def scan(c, crew_id: str = LIVE_CREW):
     if not FIXTURE.exists():
         raise Skip(f"fixture missing: {FIXTURE}")
     record = json.loads(FIXTURE.read_text(encoding="utf-8"))
-    r = c.post("/api/v1/scan", json=scan_body(record, LIVE_CREW))
+    r = c.post("/api/v1/scan", json=scan_body(record, crew_id))
     if r.status_code in (404, 405):
         raise Skip("POST /api/v1/scan not available yet (main)")
-    check(r.status_code < 300, f"POST /api/v1/scan -> {r.status_code}")
-    s = c.post("/api/v1/sos", json={"crew_id": LIVE_CREW, "symptom": "other"}).json()
+    body = r.json() if r.status_code < 300 else {}
+    check(r.status_code < 300, f"POST /api/v1/scan as {crew_id} -> {r.status_code} "
+                               f"(reading_id={body.get('reading_id')}, duplicate={body.get('duplicate')})")
+    s = c.post("/api/v1/sos", json={"crew_id": crew_id, "symptom": "other"}).json()
     v = s["vitals_snapshot"]
     check(v["data_origin"] == "camera_scan", f"vitals data_origin = {v['data_origin']}")
     for m in ("spo2_pct", "systolic_bp_mmhg", "diastolic_bp_mmhg"):
@@ -102,7 +104,10 @@ def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--url")
     ap.add_argument("--only", choices=sorted(SCENARIOS))
+    ap.add_argument("--crew", help="live crew for the scan scenario (default: LIVE_01 in-process, LIVE_SMOKE with "
+                                   "--url, so a real server's LIVE_01 history is not touched: /scan persists)")
     args = ap.parse_args(argv)
+    crew = args.crew or ("LIVE_SMOKE" if args.url else LIVE_CREW)
     c = client(args.url)
     failed = 0
     for name, fn in SCENARIOS.items():
@@ -110,7 +115,7 @@ def main(argv=None) -> int:
             continue
         print(f"[{name}]")
         try:
-            fn(c)
+            fn(c, crew) if name == "scan" else fn(c)
             print(f"  PASS  {name}")
         except Skip as e:
             print(f"  SKIP  {name}: {e}")

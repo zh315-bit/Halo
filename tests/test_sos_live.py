@@ -166,7 +166,7 @@ class FakeScanEndpoint:
     def post(self, path, json=None, **kw):
         if path == "/api/v1/scan":
             self.posted.append(json)
-            self.h["reading"], self.h["scan"] = camera_reading(json), json
+            self.h["reading"], self.h["scan"] = camera_reading(json["record"]), json["record"]
             return SimpleNamespace(status_code=201, json=lambda: {"accepted": True})
         return self.c.post(path, json=json, **kw)
 
@@ -179,7 +179,7 @@ def test_smoke_scan_scenario_passes_with_a_scan_endpoint(env, capsys):
     env["h"]["reading"], env["h"]["scan"] = DEMO, None
     fake = FakeScanEndpoint(env["c"], env["h"])
     smoke.scan(fake)
-    assert fake.posted[0]["crew_id"] == "LIVE_01" and fake.posted[0]["session_id"] == RECORD["session_id"]
+    assert fake.posted[0]["crew_id"] == "LIVE_01" and fake.posted[0]["record"]["session_id"] == RECORD["session_id"]
     out = capsys.readouterr().out
     assert "FAIL" not in out and "Not measured by camera scan" in out
 
