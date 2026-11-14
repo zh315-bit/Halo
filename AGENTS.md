@@ -118,7 +118,7 @@ Severity is `0–3`. External level names `watch` / `act` (threshold JSONs) map 
 | **POST /api/v1/sos/{session_id}/step** | submit `done` / `cannot_do` / `condition_changed`, return the next step | **Chris** |
 | **POST /api/v1/sos/{session_id}/classify** | free text → top-3 symptom candidates (shell) | **Chris** |
 | **POST /api/v1/agent/ask** | free question; with `session_id` it is limited to that checklist | **Chris** |
-| POST /api/v1/activity/morning | morning activity result, triggers the daily report | Dhruv or Chris ⚑ |
+| **POST /api/v1/activity/morning** | morning activity result, triggers the daily report. Body `{crew_id, date?, completed_at?, completion_seconds?}` → **202** `{"accepted": true, "report_date": "YYYY-MM-DD"}` (stub until ⚑ Q6) | **Chris** |
 | **GET /api/v1/crew/{crew_id}/daily-report?date=** | daily report | **Chris** |
 | **POST /api/v1/admin/mode** | toggle online/offline (demo) | **Chris** |
 
@@ -174,6 +174,24 @@ The team draft's fields are kept unchanged. `reading_id`, `indicators` and `reas
 - `baseline_quality` ∈ `ok | partial | insufficient`.
 - `reasons[].source` ∈ `nasa | guideline | team_derived | baseline`.
 - `trend` may be `null`. `engine` names the implementation; swapping in an ML model only changes this field.
+- **Request** (`POST /api/v1/score`): `{"readings": [VitalsReading, …], "baseline_until": "ISO8601" | null}`, oldest → newest;
+  the last reading is the one scored. Readings at or before `baseline_until` are the baseline phase (§7.1);
+  `null` means the whole window is baseline phase (the QR demo). Request models ignore unknown fields
+  (M1 may post a whole CSV row); response models reject them (`extra="forbid"`).
+- `indicators` has one entry per vital (`heart_rate_bpm, resp_rate_bpm, systolic_bp_mmhg, diastolic_bp_mmhg,
+  body_temp_c, spo2_pct`) plus `blink_rate_per_min`, which stays `insufficient` / `null` until a source exists
+  and is not counted in `baseline_quality` or `confidence`.
+- `indicators[].status` and `reasons[].status` ∈ `normal | caution | alert | insufficient`.
+  `baseline.group` is the activity name, or `pooled` for the cross-activity fallback (`baseline_quality: partial`).
+- A carried-forward value is not re-scored: the indicator keeps the result of that metric's last new
+  measurement and only `fresh_minutes` grows.
+- `reasons` lists only non-normal findings and missing values. `rule_id` ∈ `z_band | trend | missing` or a
+  red-flag id from `red_flags.yaml` (`spo2_low | fever | bp_crisis`, `source: guideline`).
+- Top-level `baseline_quality` is the worst quality among vitals that have a value. If no vital can be
+  assessed, `status` is `normal` but `confidence` is `0` and `baseline_quality` is `insufficient`:
+  consumers must check `confidence` before showing a green state.
+- Python entry point for other modules: `from halo_agent.core import score_latest` →
+  `score_latest(crew_id) -> ScoreResult | None` (None until that crew has been scored).
 
 ### 6.4 `SosSession`
 ```json

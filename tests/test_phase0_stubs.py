@@ -25,9 +25,18 @@ def test_score(client):
     assert any(i.status == "insufficient" and i.value is None for i in out.indicators)  # missing stays missing
 
 
-def test_score_rejects_unknown_field(client):
-    bad = dict(READING, surprise=1)
-    assert client.post("/api/v1/score", json={"readings": [bad]}).status_code == 422
+def test_score_ignores_unknown_request_fields(client):
+    # M1 may post a whole CSV row: extra columns are dropped on requests (responses stay extra="forbid").
+    row = dict(READING, scenario="baseline", step=0, bp_new_reading=True, data_context="composite_dataset_demo")
+    assert client.post("/api/v1/score", json={"readings": [row], "also": 1}).status_code == 200
+
+
+def test_morning_activity(client):
+    r = client.post("/api/v1/activity/morning", json={"crew_id": "CREW_01", "completed_at": "2026-11-16T07:30:00Z"})
+    assert r.status_code == 202 and r.json() == {"accepted": True, "report_date": "2026-11-16"}
+    r = client.post("/api/v1/activity/morning", json={"crew_id": "CREW_01", "date": "2026-11-17", "x": 1})
+    assert r.json()["report_date"] == "2026-11-17"
+    assert client.post("/api/v1/activity/morning", json={"crew_id": "CREW_01", "date": "bad"}).status_code == 422
 
 
 def test_sos_flow(client):

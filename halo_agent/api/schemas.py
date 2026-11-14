@@ -20,17 +20,22 @@ Activity = Literal["resting", "in_bed", "active"]
 
 
 class _Strict(BaseModel):
-    # Reject unknown fields so a contract drift shows up as a 422 / test failure, not silently.
+    """Base for RESPONSE models: unknown fields are a bug, so they fail loudly (tests catch contract drift)."""
     model_config = ConfigDict(extra="forbid")
 
 
+class _Request(BaseModel):
+    """Base for REQUEST models: unknown fields are dropped. M1 may post a whole 23-column CSV row."""
+    model_config = ConfigDict(extra="ignore")
+
+
 # ---------- 6.2 VitalsReading ----------
-class NewReading(_Strict):
+class NewReading(_Request):
     bp: bool
     temp: bool
 
 
-class VitalsReading(_Strict):
+class VitalsReading(_Request):
     reading_id: str
     crew_id: str
     timestamp: str
@@ -98,8 +103,24 @@ class ScoreResult(_Strict):
     reasons: list[Reason]
 
 
-class ScoreRequest(_Strict):
-    readings: list[VitalsReading] = Field(min_length=1)
+class ScoreRequest(_Request):
+    readings: list[VitalsReading] = Field(min_length=1)   # oldest -> newest; the last one is scored
+    # Readings at or before this time form the crew's baseline phase (AGENTS.md §7.1), the rest are scored
+    # against the frozen baseline. null = every reading in the window is baseline phase (the QR demo case).
+    baseline_until: Optional[str] = None
+
+
+# ---------- /activity/morning (stub until ⚑ Q6 defines the activity) ----------
+class MorningActivityRequest(_Request):
+    crew_id: str
+    date: Optional[str] = None                # YYYY-MM-DD report date; defaults to completed_at's date
+    completed_at: Optional[str] = None        # ISO8601
+    completion_seconds: Optional[float] = None
+
+
+class MorningActivityAccepted(_Strict):
+    accepted: Literal[True]
+    report_date: str
 
 
 # ---------- 6.4 SosSession ----------
@@ -147,18 +168,18 @@ class SosSession(_Strict):
     disclaimer: Literal["Decision support only. Not a diagnosis."]
 
 
-class SosStartRequest(_Strict):
+class SosStartRequest(_Request):
     crew_id: str
     symptom: Optional[str] = None          # picker path
     free_text: Optional[str] = None        # speech/typed path -> /classify first
 
 
-class SosStepRequest(_Strict):
+class SosStepRequest(_Request):
     action: StepOption
 
 
 # ---------- /classify and /agent/ask (not in §6; shapes from §10) ----------
-class ClassifyRequest(_Strict):
+class ClassifyRequest(_Request):
     free_text: str
 
 
@@ -175,7 +196,7 @@ class ClassifyResponse(_Strict):
     mode: Mode
 
 
-class AskRequest(_Strict):
+class AskRequest(_Request):
     question: str
     session_id: Optional[str] = None
     crew_id: Optional[str] = None
@@ -234,7 +255,7 @@ class DailyReport(_Strict):
 
 
 # ---------- admin ----------
-class ModeRequest(_Strict):
+class ModeRequest(_Request):
     mode: Mode
 
 
