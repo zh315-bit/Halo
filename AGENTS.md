@@ -477,7 +477,7 @@ steps:
 
 Policy (also in `escalation.yaml`):
 - **Same-reason cooldown:** a reason already sent is not re-sent within `same_reason_cooldown_s`; the repeat is
-  logged as `escalate_suppressed`. Value **[N — TBD]** (`null` = not set: every repeat is sent).
+  logged as `escalate_suppressed`. Value **60 s** (`team_derived`, 2026-11-14: no repeated demo SMS); `null` = off.
 - **Level** `urgent | report`: urgent = SMS (or queue/dry run). report = session log + ground report queue
   (`data/sos_sessions/ground_reports.jsonl`, `GET /api/v1/sos/ground-reports`), no SMS, UI "Reported to flight
   surgeon". Resolution: `step_levels["<protocol_id>.<step_id>"]` > checklist step `level` > `rule_levels[rule]` >
@@ -500,8 +500,13 @@ time, session id) — no medical text.
 ### 8.5 Proactive nudge (`sos/nudge.py`, `config/nudges.yaml`)
 Suggests checking on a crewmate when their score turns `alert`. Deterministic, offline, no LLM, **no new medical
 content**: suggestions are derived from the checklists' `red_flags`.
-- **Trigger:** the crew's latest `ScoreResult` transitions into `alert` (first alert seen, or non-alert → alert),
-  evaluated when `GET /api/v1/crew/{crew_id}/nudges` is polled.
+- **Trigger (push):** a hook runs right after every `Engine.update` (`routes_sos.attach_nudges(engine)`, called once in
+  `app.py` after the warm-up, so only live updates nudge). When that `ScoreResult` transitions into `alert` (first
+  alert seen, or non-alert → alert) the nudge is created in the same call and sent to the event exit
+  **`on_nudge(nudge)`**: subscribers register with `halo_agent.sos.nudge.register_on_nudge(fn)` (Dhruv's WebSocket).
+  A snoozed nudge that becomes active again is pushed too (noticed on the next score update or list). A failing
+  subscriber or hook never affects `Engine.update`. The hook uses `engine.add_listener(fn)` if core provides it,
+  otherwise it wraps `update` on that Engine instance (core code unchanged).
 - **Red-flag alert** (a reason with a red-flag `rule_id` and status `alert`): checklists whose `red_flags` contain it,
   ordered by `priority` (`spo2_low: [breathing_difficulty, chest_pain]`, `bp_crisis: [chest_pain]`; other matches
   follow in file order), at most `max_suggestions` (2), then `other`. Text: "Check on your crewmate. Red flag: …".
@@ -513,7 +518,7 @@ content**: suggestions are derived from the checklists' `red_flags`.
 - **Nudge:** `{nudge_id, crew_id, created_at, state: active|snoozed|dismissed|accepted, text, trigger: {reading_id,
   as_of, status, severity, kind: red_flag|z_band, red_flags, reasons}, suggestions: [{symptom, protocol_id, title,
   review_label, because}], snoozed_until, session_id, disclaimer}`.
-- **Endpoints:** `GET /api/v1/crew/{crew_id}/nudges` (active nudges), `POST /api/v1/nudges/{id}/snooze`
+- **Endpoints:** `GET /api/v1/crew/{crew_id}/nudges` (lists active nudges; never creates one), `POST /api/v1/nudges/{id}/snooze`
   (`minutes` ∈ `snooze_minutes` [5, 15, 30]; also holds back new nudges for that crew until it ends; the snoozed
   nudge comes back active afterwards), `POST /api/v1/nudges/{id}/dismiss`, `POST /api/v1/nudges/{id}/accept`
   (`symptom` must be one of the suggestions; starts an SOS session for that crew — mission support is alerted —
@@ -535,8 +540,14 @@ content**: suggestions are derived from the checklists' `red_flags`.
 ## 10. M6 + shell — knowledge and LLM
 
 - `LLMClient` (`shell/llm.py`): `available() -> bool`, `complete(system, user, timeout_s) -> str`. Provider and
-  key come from env (`HALO_LLM_PROVIDER`, `HALO_LLM_API_KEY`, `HALO_LLM_MODEL`) ⚑; until an adapter exists every
-  value maps to `NullLLM`. Tests use `FakeLLM`. **All calls go through `call_llm()`**, which returns the fallback
+  key come from env: `HALO_LLM_PROVIDER=anthropic`, `HALO_LLM_API_KEY`, `HALO_LLM_MODEL` (default `claude-opus-5-5`),
+  `HALO_LLM_EFFORT` (default `low`). Decided 2026-11-14: **Anthropic, Claude Opus 5.5** (closes ⚑ Q8 provider/model;
+  key and venue internet still open). `AnthropicLLM` uses the official `anthropic` SDK (optional extra `llm`:
+  `uv sync --extra llm`) on the beta Messages endpoint: no `thinking` parameter (always on for Opus 5.5), explicit
+  `output_config.effort`, server-side refusal fallbacks (`fallbacks: "default"`, beta `server-side-fallback-2026-07-01`),
+  SDK `max_retries=0`. `stop_reason` `refusal` or `max_tokens` → treated as an error → deterministic fallback. Any
+  missing piece (provider, key, SDK, valid effort) → `NullLLM`. The SDK client is built lazily on the first online
+  call. Smoke test: `uv run --env-file .env python -m halo_agent.shell.llm`. Tests use `FakeLLM`. **All calls go through `call_llm()`**, which returns the fallback
   before touching the client when offline or unavailable; timeout `HALO_LLM_TIMEOUT_S` (≤ 8 s); errors fall back.
 - Orchestration: **LangGraph** router → `sos` / `ask` / `report` subgraphs. In offline mode the same graph
   runs, with LLM nodes swapped for rule/template nodes.

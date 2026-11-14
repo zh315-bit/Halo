@@ -69,9 +69,9 @@ def test_same_reason_cooldown(tmp_path):
     assert [m["reason"] for m in v["alert"]["messages"]].count("escalate_step:c_cpr") == 2
 
 
-def test_cooldown_unset_sends_every_repeat(tmp_path):
-    s, _ = svc(tmp_path)                                           # shipped config: [N — TBD] -> null
-    assert s.rules.same_reason_cooldown_s is None
+def test_shipped_cooldown_is_60_and_null_turns_it_off(tmp_path):
+    assert svc(tmp_path)[0].rules.same_reason_cooldown_s == 60      # team_derived
+    s, _ = svc(tmp_path / "off", same_reason_cooldown_s=None)
     v, _ = s.start("CREW_01", "other")
     v = go(s, v["session_id"], "cannot_do")
     v, _ = s.start("CREW_01", "chest_pain")

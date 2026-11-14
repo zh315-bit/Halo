@@ -5,13 +5,17 @@ which checklist(s) to open. Deterministic, offline, no LLM, and no new medical c
   rule, ordered by config/nudges.yaml `priority`, at most `max_suggestions`, then `other`;
 - z-band alert without a red flag: `other` only, text "Check on your crewmate".
 
-Evaluated when polled (GET /api/v1/crew/{crew_id}/nudges): a nudge is created on the transition into `alert`
-(first alert seen, or non-alert -> alert). Suppressed while the crew has an open SOS session, while snoozed, within
-`min_interval_s` of the previous nudge, or while an earlier nudge is still active. Every decision is logged.
+Push, not poll: `attach(engine, handler)` runs `handler(score)` right after every `Engine.update`, and the nudge is
+created on the transition into `alert` (first alert seen, or non-alert -> alert). Each new (or re-activated after a
+snooze) nudge is sent to every `on_nudge` exit registered with `register_on_nudge(fn)` (Dhruv's WebSocket).
+`GET /api/v1/crew/{crew_id}/nudges` only lists. Suppressed while the crew has an open SOS session, while snoozed,
+within `min_interval_s` of the previous nudge, or while an earlier nudge is still active. Every decision is logged.
+A failing handler or exit never breaks Engine.update.
 """
 
 from __future__ import annotations
 
+import logging
 import threading
 import uuid
 from dataclasses import dataclass
@@ -26,7 +30,54 @@ from .vitals import as_dict
 
 CONFIG = Path(__file__).resolve().parents[2] / "config" / "nudges.yaml"
 RED_FLAGS_FILE = Path(__file__).resolve().parents[2] / "config" / "red_flags.yaml"
+log = logging.getLogger("halo.sos.nudge")
 TEXT = "Check on your crewmate"
+
+# ---------- event exit: on_nudge(nudge) ----------
+_exits: list[Callable[[dict], None]] = []
+
+
+def register_on_nudge(fn: Callable[[dict], None]) -> Callable[[], None]:
+    """Subscribe to new / re-activated nudges (a copy of the Nudge dict). Returns an unsubscribe function."""
+    _exits.append(fn)
+    return lambda: _exits.remove(fn) if fn in _exits else None
+
+
+def on_nudge(nudge: dict) -> None:
+    """The event exit. Calls every registered subscriber; one failing subscriber does not stop the others."""
+    for fn in list(_exits):
+        try:
+            fn(dict(nudge))
+        except Exception:
+            log.exception("on_nudge subscriber failed")
+
+
+# ---------- hook into the Engine without changing core ----------
+def attach(engine, handler: Callable[[object], None]) -> bool:
+    """Run `handler(score)` after every `engine.update(reading)`. Uses `engine.add_listener` if core provides one;
+    otherwise wraps `update` on this Engine instance only (core code is untouched). Idempotent. Returns True if
+    newly attached."""
+    if engine is None or getattr(engine, "_halo_nudge_attached", False):
+        return False
+
+    def safe(score):
+        try:
+            handler(score)
+        except Exception:
+            log.exception("nudge handler failed (Engine.update result kept)")
+
+    if hasattr(engine, "add_listener"):
+        engine.add_listener(safe)
+    else:
+        original = engine.update
+
+        def update(reading, *a, **kw):
+            res = original(reading, *a, **kw)
+            safe(res)
+            return res
+        engine.update = update
+    engine._halo_nudge_attached = True
+    return True
 DISCLAIMER = "Decision support only. Not a diagnosis."
 
 
@@ -124,11 +175,9 @@ def _iso(dt: datetime) -> str:
 
 
 class NudgeService:
-    def __init__(self, sos, cfg: Optional[NudgeConfig] = None, score_fn: Optional[Callable] = None,
-                 red_flags: Optional[set] = None):
+    def __init__(self, sos, cfg: Optional[NudgeConfig] = None, red_flags: Optional[set] = None):
         self.sos = sos                                   # SosService: checklists, open sessions, start, log, clock
         self.cfg = cfg or load_config(sos.checklists)
-        self.score_fn = score_fn or sos.score_fn
         self.red_flags = red_flags if red_flags is not None else red_flag_ids(sos.checklists)
         self.nudges: dict[str, dict] = {}
         self._last_status: dict[str, str] = {}
@@ -145,23 +194,37 @@ class NudgeService:
                 return s.session_id
         return None
 
-    def evaluate(self, crew_id: str) -> list[dict]:
-        """Check the latest score; maybe create a nudge. Returns this crew's active nudges."""
+    def _expire_snoozes(self, crew_id: str, now: datetime) -> None:
+        for n in self.nudges.values():
+            if n["state"] == "snoozed" and n["crew_id"] == crew_id and now >= _parse(n["snoozed_until"]):
+                n["state"], n["snoozed_until"] = "active", None
+                self._log({"event": "nudge_reactivated", "nudge_id": n["nudge_id"], "crew_id": crew_id,
+                           "at": _iso(now)})
+                on_nudge(n)
+
+    def on_score(self, score) -> Optional[dict]:
+        """Called right after Engine.update with its ScoreResult. Returns the nudge if one was created."""
+        sc = as_dict(score)
+        crew_id = (sc or {}).get("crew_id")
+        if not crew_id:
+            return None
         with self._lock:
             now = _parse(self.sos.now())
-            for n in self.nudges.values():                    # snooze expiry -> active again
-                if n["state"] == "snoozed" and n["crew_id"] == crew_id and now >= _parse(n["snoozed_until"]):
-                    n["state"], n["snoozed_until"] = "active", None
-            try:
-                score = as_dict(self.score_fn(crew_id))
-            except Exception:
-                score = None
-            status = (score or {}).get("status")
-            prev = self._last_status.get(crew_id)
+            self._expire_snoozes(crew_id, now)
+            status, prev = sc.get("status"), self._last_status.get(crew_id)
             if status:
                 self._last_status[crew_id] = status
             if status == "alert" and prev != "alert":
-                self._maybe_create(crew_id, score, now)
+                n = self._maybe_create(crew_id, sc, now)
+                if n is not None:
+                    on_nudge(n)
+                return n
+            return None
+
+    def list(self, crew_id: str) -> list[dict]:
+        """GET /nudges: lists only (snooze expiry is applied; nothing is created here)."""
+        with self._lock:
+            self._expire_snoozes(crew_id, _parse(self.sos.now()))
             return self.active(crew_id)
 
     def _maybe_create(self, crew_id: str, score: dict, now: datetime) -> None:
@@ -177,7 +240,7 @@ class NudgeService:
         base = {"crew_id": crew_id, "at": _iso(now), "reading_id": score.get("reading_id")}
         if why:
             self._log({**base, "event": "nudge_suppressed", "why": why})
-            return
+            return None
         reasons = score.get("reasons") or []
         fired = []
         for r in reasons:
@@ -196,6 +259,7 @@ class NudgeService:
         self.nudges[n["nudge_id"]] = n
         self._last_created[crew_id] = now
         self._log({**base, "event": "nudge_created", "nudge": n})
+        return dict(n)
 
     def active(self, crew_id: str) -> list[dict]:
         return [dict(n) for n in self.nudges.values() if n["crew_id"] == crew_id and n["state"] == "active"]

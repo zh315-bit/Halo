@@ -20,6 +20,9 @@ app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], all
 core.set_engine(core.Engine(load_scoring_config()))
 replay.warmup_from_env()     # HALO_WARMUP_CSV=qr_scan_demo_clean.csv -> score_latest works before M1 exists
 
+# sos-v2: create nudges as scores change (§8.5). After warm-up, so only live updates nudge.
+routes_sos.attach_nudges(core.get_engine())
+
 for r in (routes_score, routes_sos, routes_report, routes_admin):
     app.include_router(r.router)
 
