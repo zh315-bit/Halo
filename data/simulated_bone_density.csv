@@ -1,0 +1,43 @@
+crew_id,mission_day,site,pct_of_preflight,halo_status,rate_pct_per_month_used,data_type
+SIM-A (exercise on schedule),0,lumbar_spine_L1_L4,100.0,normal,-0.32,SIMULATED
+SIM-A (exercise on schedule),0,total_hip,100.0,normal,-0.5,SIMULATED
+SIM-A (exercise on schedule),0,femoral_neck,100.0,normal,-0.5,SIMULATED
+SIM-A (exercise on schedule),30,lumbar_spine_L1_L4,99.66,normal,-0.32,SIMULATED
+SIM-A (exercise on schedule),30,total_hip,99.47,normal,-0.5,SIMULATED
+SIM-A (exercise on schedule),30,femoral_neck,99.48,normal,-0.5,SIMULATED
+SIM-A (exercise on schedule),60,lumbar_spine_L1_L4,99.47,normal,-0.32,SIMULATED
+SIM-A (exercise on schedule),60,total_hip,98.98,normal,-0.5,SIMULATED
+SIM-A (exercise on schedule),60,femoral_neck,98.78,normal,-0.5,SIMULATED
+SIM-A (exercise on schedule),90,lumbar_spine_L1_L4,99.09,normal,-0.32,SIMULATED
+SIM-A (exercise on schedule),90,total_hip,98.46,normal,-0.5,SIMULATED
+SIM-A (exercise on schedule),90,femoral_neck,98.47,normal,-0.5,SIMULATED
+SIM-A (exercise on schedule),120,lumbar_spine_L1_L4,98.74,normal,-0.32,SIMULATED
+SIM-A (exercise on schedule),120,total_hip,98.03,normal,-0.5,SIMULATED
+SIM-A (exercise on schedule),120,femoral_neck,98.17,normal,-0.5,SIMULATED
+SIM-A (exercise on schedule),150,lumbar_spine_L1_L4,98.5,normal,-0.32,SIMULATED
+SIM-A (exercise on schedule),150,total_hip,97.52,normal,-0.5,SIMULATED
+SIM-A (exercise on schedule),150,femoral_neck,97.39,normal,-0.5,SIMULATED
+SIM-A (exercise on schedule),180,lumbar_spine_L1_L4,97.93,normal,-0.32,SIMULATED
+SIM-A (exercise on schedule),180,total_hip,97.04,normal,-0.5,SIMULATED
+SIM-A (exercise on schedule),180,femoral_neck,97.2,normal,-0.5,SIMULATED
+"SIM-B (exercise missed, pre-ARED rates)",0,lumbar_spine_L1_L4,100.0,normal,-1.06,SIMULATED
+"SIM-B (exercise missed, pre-ARED rates)",0,total_hip,100.0,normal,-1.56,SIMULATED
+"SIM-B (exercise missed, pre-ARED rates)",0,femoral_neck,100.0,normal,-1.56,SIMULATED
+"SIM-B (exercise missed, pre-ARED rates)",30,lumbar_spine_L1_L4,98.95,normal,-1.06,SIMULATED
+"SIM-B (exercise missed, pre-ARED rates)",30,total_hip,98.42,normal,-1.56,SIMULATED
+"SIM-B (exercise missed, pre-ARED rates)",30,femoral_neck,98.52,normal,-1.56,SIMULATED
+"SIM-B (exercise missed, pre-ARED rates)",60,lumbar_spine_L1_L4,97.66,normal,-1.06,SIMULATED
+"SIM-B (exercise missed, pre-ARED rates)",60,total_hip,96.83,watch,-1.56,SIMULATED
+"SIM-B (exercise missed, pre-ARED rates)",60,femoral_neck,96.95,normal,-1.56,SIMULATED
+"SIM-B (exercise missed, pre-ARED rates)",90,lumbar_spine_L1_L4,96.95,watch,-1.06,SIMULATED
+"SIM-B (exercise missed, pre-ARED rates)",90,total_hip,95.28,watch,-1.56,SIMULATED
+"SIM-B (exercise missed, pre-ARED rates)",90,femoral_neck,95.38,normal,-1.56,SIMULATED
+"SIM-B (exercise missed, pre-ARED rates)",120,lumbar_spine_L1_L4,95.8,watch,-1.06,SIMULATED
+"SIM-B (exercise missed, pre-ARED rates)",120,total_hip,93.88,act,-1.56,SIMULATED
+"SIM-B (exercise missed, pre-ARED rates)",120,femoral_neck,93.59,watch,-1.56,SIMULATED
+"SIM-B (exercise missed, pre-ARED rates)",150,lumbar_spine_L1_L4,94.79,act,-1.06,SIMULATED
+"SIM-B (exercise missed, pre-ARED rates)",150,total_hip,91.97,act,-1.56,SIMULATED
+"SIM-B (exercise missed, pre-ARED rates)",150,femoral_neck,91.81,watch,-1.56,SIMULATED
+"SIM-B (exercise missed, pre-ARED rates)",180,lumbar_spine_L1_L4,93.55,act,-1.06,SIMULATED
+"SIM-B (exercise missed, pre-ARED rates)",180,total_hip,90.5,act,-1.56,SIMULATED
+"SIM-B (exercise missed, pre-ARED rates)",180,femoral_neck,90.77,watch,-1.56,SIMULATED

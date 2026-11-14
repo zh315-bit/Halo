@@ -1,0 +1,25 @@
+{
+  "_about": "HALO bone mineral density (BMD) thresholds, expressed as % of the crewmember's own pre-mission BMD so no absolute g/cm2 baseline is needed. NASA values are copied from the source; the 97% / 95% buffer lines are DERIVED by our team.",
+  "nasa_standard": {
+    "source": "NASA-STD-3001 Volume 1 Revision C (2023-09-15), section 4.7, pages 39-40",
+    "source_url": "https://standards.nasa.gov/sites/default/files/standards/NASA/C//nasa-std-3001-vol-1-rev-c-signature.pdf",
+    "V1 4026_pre_mission": "pre-mission BMD T-scores for total hip and lumbar spine (L1-L4) shall be consistent with an age, sex, gender, and ethnic-matched population (no numeric cut-off given)",
+    "V1 4027_in_mission": "Countermeasures shall maintain BMD of the hip and spine at or above 95% of pre-mission values, and at or above 90% for the femoral neck",
+    "V1 4028_post_mission": "reconditioning aimed at returning BMD to pre-mission baseline"
+  },
+  "halo_alert_rules": [
+    {"site": "total_hip", "metric": "pct_of_preflight", "levels": [{"status": "normal", "min": 97}, {"status": "watch", "min": 95, "max": 97}, {"status": "act", "max": 95}], "basis": "act = below NASA V1 4027 (95%); watch = 2-point buffer (derived)"},
+    {"site": "lumbar_spine_L1_L4", "metric": "pct_of_preflight", "levels": [{"status": "normal", "min": 97}, {"status": "watch", "min": 95, "max": 97}, {"status": "act", "max": 95}], "basis": "same as total_hip"},
+    {"site": "femoral_neck", "metric": "pct_of_preflight", "levels": [{"status": "normal", "min": 95}, {"status": "watch", "min": 90, "max": 95}, {"status": "act", "max": 90}], "basis": "act = below NASA V1 4027 (90%); watch = 5-point buffer (derived)"}
+  ],
+  "simulation_parameters": {
+    "source": "NASA HRP Evidence Report: Risk of Bone Fracture due to Spaceflight-induced Changes to Bone (2017), p.4 and Table 4 p.22",
+    "source_url": "https://ntrs.nasa.gov/api/citations/20170004597/downloads/20170004597.pdf",
+    "general_loss_pct_per_month": "1 to 1.5 (weight-bearing sites: hip, lumbar spine, lower limbs)",
+    "with_ARED_exercise_n11": {"lumbar_spine": {"mean": -0.32, "sd": 0.44}, "trochanter": {"mean": -0.50, "sd": 0.40}},
+    "pre_ARED": {"lumbar_spine": {"mean": -1.06, "sd": 0.63}, "trochanter": {"mean": -1.56, "sd": 0.99}},
+    "recovery": "slower than the loss, asymptotic; can return to pre-flight as early as 6 months after landing (p.15, p.23)",
+    "secondary_check": "Stavnichuk et al. 2020 npj Microgravity 6:13 meta-analysis (~148 astronauts): lower limbs -0.8%/month [-1.1, -0.5]; https://pmc.ncbi.nlm.nih.gov/articles/PMC7200725"
+  },
+  "note": "On the ISS, BMD is measured by DXA/QCT before and after flight, not in flight. HALO's in-flight bone value is therefore an ESTIMATE from these rates (plus exercise compliance), and should be labelled as such in the demo."
+}

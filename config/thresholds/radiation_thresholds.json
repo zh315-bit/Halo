@@ -1,0 +1,83 @@
+{
+  "_about": "HALO radiation alert thresholds. 'nasa_limits' are NASA's published numbers copied from the source. Every value under 'halo_alert_rules' is DERIVED by our team from those limits (marked basis). Units match Kavya's ISS file radiation_5min.csv: dose_rate_ugy_h (absorbed dose rate, microgray per hour, DOSTEL-1 in ISS Columbus) and observed_dose_accumulated_day_ugy.",
+  "nasa_limits": {
+    "source": "NASA-STD-3001 Volume 1 Revision C (approved 2023-09-15), section 4.8",
+    "source_url": "https://standards.nasa.gov/sites/default/files/standards/NASA/C//nasa-std-3001-vol-1-rev-c-signature.pdf",
+    "alara": {"id": "V1 4029", "text": "All crewmember radiation exposures shall be minimized using the ALARA principle.", "page": 40},
+    "career_effective_dose": {"id": "V1 4030", "limit": 600, "unit": "mSv", "page": 40},
+    "spe_effective_dose_per_event": {"id": "V1 4031", "limit": 250, "unit": "mSv", "page": 43, "note": "design reference SPE = sum of the October 1989 events"},
+    "non_cancer_limits_table_4_8_1": {
+      "page": 42,
+      "unit": "mGy-Eq (CNS rows in mGy)",
+      "rows": [
+        {"organ": "lens", "d30": 1000, "y1": 2000, "career": 4000},
+        {"organ": "skin", "d30": 1500, "y1": 3000, "career": 6000},
+        {"organ": "blood_forming_organs", "d30": 250, "y1": 500, "career": null},
+        {"organ": "circulatory_system", "d30": 250, "y1": 500, "career": 1000},
+        {"organ": "cns", "d30": 500, "y1": 1000, "career": 1500},
+        {"organ": "cns_z_ge_10", "d30": null, "y1": 100, "career": 250}
+      ]
+    },
+    "also_in": "OCHMO-TB-020 Rev E (2022-12-27) radiation protection technical brief: https://www.nasa.gov/wp-content/uploads/2023/03/radiation-protection-technical-brief-ochmo.pdf"
+  },
+  "iss_baseline": {
+    "source": "Berger et al. 2017, J. Space Weather Space Clim. 7, A8 (DOSIS / DOSIS 3D, DOSTEL in Columbus, 2009-2016). DLR/ESA measurement, not a NASA document.",
+    "source_url": "https://www.swsc-journal.org/articles/swsc/full_html/2017/01/swsc160046/swsc160046.html",
+    "absorbed_dose_ugy_per_day": {"gcr_2009": 160, "gcr_2013": 145, "saa_2009": 80, "saa_2013": 150, "total_may_2016_up_to": 286},
+    "dose_equivalent_usv_per_day_may_2016": 647,
+    "mean_quality_factor": {"gcr": 3.13, "saa": 1.20},
+    "derived_conversion": {"factor_usv_per_ugy": 2.3, "basis": "647 / 286 from the same paper; use to turn absorbed dose (uGy) into approximate dose equivalent (uSv) and, as an approximation, mGy-Eq for BFO. Approximation only."}
+  },
+  "halo_alert_rules": [
+    {
+      "metric": "observed_dose_accumulated_day_ugy",
+      "levels": [
+        {"status": "normal", "max": 600},
+        {"status": "watch", "min": 600, "max": 3600},
+        {"status": "act", "min": 3600}
+      ],
+      "basis": "watch = more than 2x the measured ISS daily total (~286 uGy/day), ALARA [V1 4029]. act = 3600 uGy x 2.3 = ~8.3 mGy-Eq per day; at that pace the 30-day BFO limit of 250 mGy-Eq (Table 4.8-1) is reached in 30 days.",
+      "derived": true
+    },
+    {
+      "metric": "dose_rate_ugy_h (only when in_saa_box is False; SAA passes are expected spikes and are logged, not alerted)",
+      "levels": [
+        {"status": "normal", "max": 25},
+        {"status": "watch", "min": 25, "max": 150, "sustain_minutes": 15},
+        {"status": "act", "min": 150, "sustain_minutes": 60}
+      ],
+      "basis": "25 uGy/h = 2x the ISS daily mean rate (286/24 = ~12 uGy/h; Kavya's own peak_threshold_ugy_h is 11.6). 150 uGy/h = 3600 uGy/day, the act pace above. A sustained rise outside the SAA suggests a solar particle event.",
+      "derived": true
+    },
+    {
+      "metric": "rolling_30d_bfo_mgy_eq (sum of daily uGy x 2.3 / 1000)",
+      "levels": [
+        {"status": "normal", "max": 125},
+        {"status": "watch", "min": 125, "max": 200},
+        {"status": "act", "min": 200}
+      ],
+      "basis": "50% and 80% of NASA's 30-day BFO limit, 250 mGy-Eq (Table 4.8-1).",
+      "derived": true
+    },
+    {
+      "metric": "career_dose_msv (prior career + this mission, dose equivalent as effective-dose proxy)",
+      "levels": [
+        {"status": "normal", "max": 300},
+        {"status": "watch", "min": 300, "max": 480},
+        {"status": "act", "min": 480}
+      ],
+      "basis": "50% and 80% of NASA career limit 600 mSv [V1 4030]. For scale: 647 uSv/day x 180 days = ~116 mSv for a 6-month ISS mission (~19% of the limit).",
+      "derived": true
+    },
+    {
+      "metric": "spe_event_dose_msv (dose equivalent accumulated since an SPE alert began)",
+      "levels": [
+        {"status": "normal", "max": 50},
+        {"status": "watch", "min": 50, "max": 125},
+        {"status": "act", "min": 125}
+      ],
+      "basis": "20% and 50% of NASA's per-event SPE limit, 250 mSv [V1 4031]; act = move crew to the shielded area.",
+      "derived": true
+    }
+  ]
+}

@@ -1,0 +1,427 @@
+# AGENTS.md — HALO Agent
+
+Instructions for any coding agent working in this repo. Read this file fully before writing code.
+Design source: *HALO AI Agent 架构设计* (Nov 14, 2026). Where this file and that doc differ, this file wins
+for implementation details. Any item marked ⚑ is still open with the team (§13).
+
+## 1. What we are building
+
+HALO is our team's entry in the **2026 NASA Space Apps Challenge** (Nov 14–15), challenge *"Create Health
+Monitoring Software for Astronauts on Space Missions"*.
+
+The **HALO Agent** is an onboard, autonomous health assistant with two jobs:
+1. **Crew SOS:** when a crew member is in trouble, it walks a crewmate through a preset response checklist, one step at a time.
+2. **Daily report:** every morning it produces a health report for each crew member.
+
+All judgements are made against **that crew member's own baseline**, and the agent keeps working with Earth
+out of contact (about 20 min communication delay).
+
+**This repo's owner (Chris) builds modules M2–M6.** M1 (data ingest, Dhruv / Kavya) and M7 (notifications)
+are integration points only: code against their interfaces, don't build them.
+
+Judging criteria that drive design:
+- **Validity:** every threshold and every checklist step must be traceable to a source.
+- **Impact / Creativity:** personal baseline, trend detection and offline operation.
+
+## 2. Core architecture: deterministic core + LLM shell
+
+| Layer | Contents | Network | LLM |
+|---|---|---|---|
+| **Core** (must run offline) | personal baseline, scoring engine, red flags, SOS checklist state machine, report templates | not needed | **never** |
+| **Shell** (enhancement when online) | (a) map a crewmate's spoken/typed description to symptom candidates, (b) answer follow-up questions using only the current checklist + vitals, (c) rewrite the daily report as plain prose | needed | yes |
+
+- When the shell is unavailable (offline flag set, no key, timeout, or error), every feature degrades:
+  symptom classification → symptom picker; ask → "Not covered offline — follow the checklist";
+  report prose → template text.
+- Degradation must be **automatic and silent to the core**: the core never imports the shell.
+- Offline mode switch: env `HALO_OFFLINE=1` **and** a runtime toggle `POST /api/v1/admin/mode {"mode":"offline"}`.
+  The demo will "pull the network" live.
+
+## 3. Non-negotiable rules
+
+1. **Never invent medical content.** No thresholds, checklist steps, drug names or doses that the team did not
+   supply with a source. If something has no source: keep it `enabled: false` / `verified: false`, use the
+   placeholder text `"[PLACEHOLDER — not medical guidance]"`, and flag it in your summary.
+2. **No diagnosis.** Output says how far a reading deviates from baseline and what the checklist says to do.
+   It never names a disease. Every SOS and report payload carries `"disclaimer": "Decision support only. Not a diagnosis."`
+3. **The LLM only uses provided text.** Answers must cite a checklist step id or a knowledge-base chunk id.
+   If there is nothing to cite, reply "The checklist doesn't cover this — contact ground." Medication text
+   is shown verbatim from the checklist, never generated.
+4. **Humans decide.** LLM symptom classification returns the top 3 candidates; the crewmate confirms one.
+   Never auto-select. Escalation recipients are fixed in config.
+5. **Missing is missing.** Never treat a missing value as normal or 0. Every result carries `confidence` and `data_origin`.
+6. **Label data honestly.** Demo readings always keep `"Demo data - not measured from your camera"`.
+   Generated data is marked `SIMULATED` in the file name, header and `data_origin`. NASA environmental data
+   and Inspiration4 lab data are stored **separately** from QR session readings and are never merged into one dataset.
+7. **No look-ahead.** A reading is scored only with data at or before its own timestamp.
+8. **Contracts first.** Don't change the schemas in §6 without updating this file and telling the user.
+9. Core uses the standard library only (`csv`, `statistics`, `math`, `datetime`). No pandas in `halo_agent/core/`.
+
+## 4. Modules
+
+| Module | Owner | Input | Output |
+|---|---|---|---|
+| M1 Data ingest | Dhruv (backend), Kavya (schema) | face-scan vitals or QR demo CSV playback, morning activity time | `VitalsReading` with source label |
+| **M2 Personal baseline** | Chris | crew's history of `VitalsReading`, grouped by activity | per-metric median, spread, deviation, multi-day trend |
+| **M3 Scoring engine** | Chris | latest reading window + baseline | `ScoreResult` |
+| **M4 Crew SOS** | Chris | symptom (picker or speech), latest vitals, score | current checklist step, related vitals, escalation decision |
+| **M5 Daily report** | Chris | previous night's in-bed period, morning activity time, trends, environment reference | `DailyReport` |
+| **M6 Protocol & knowledge library** | Chris (content source ⚑) | preset checklists, NASA public references | checklist JSON, citable chunks |
+| M7 Notify & escalate | TBD (Twilio ⚑) | escalation events from M4 | SMS/call attempt, ack state, offline queue |
+
+## 5. Data facts (verified from real headers)
+
+### `qr_scan_demo_clean.csv` (Kavya)
+- 276 rows × 23 columns, one crew member `CREW_01`, every row `scenario=baseline`, 5-minute interval,
+  mission days 1–2 (`clock_time` 10:10 → next day 09:05). No missing values.
+- ID column is `demo_record_id` → map it to `reading_id`.
+- **Timestamp ⚑:** there is no calendar date. For now:
+  `timestamp = mission_start (config, default 2026-11-15T00:00:00Z) + (mission_day − 1) days + clock_time`.
+- `activity`: resting 166, in_bed 76, active 34.
+- **Carry-forward:** BP, temp, resp and SpO2 mostly repeat the previous value. SBP changes only 26 times,
+  temp 5 times, roughly in sync with `bp_new_reading` / `temp_new_reading`.
+- `measurement_origin = master_csv_playback_not_camera` → `data_origin = "demo_playback"`.
+- ⚠️ BP is high for a "baseline": the first row is 162/58, the last SBP is 189, and the resting SBP median is 162 ⚑.
+  The `bp_crisis` red flag (§7.4) will fire on the last rows. That is correct behaviour; don't suppress it.
+- No `blink_rate_per_min` column ⚑. Keep the field nullable.
+
+### `radiation_5min.csv`
+- Historical ISS Columbus readings, 2024-05-01 → 2024-05-30, 8,627 rows. Absorbed dose in µGy.
+  This is **environment**, not personal dose.
+- It is used only as an `environment_context` reference ("Historical ISS radiation - May 2024").
+  It never changes a crew member's `status` or `severity`.
+- 2024-05-11 has 4 SAA periods above 25 µGy/h for ≥15 min, which makes a good reference example.
+- No radiation prediction model exists → show `"Model not trained"`, never a made-up number.
+
+### `simulated_bone_density.csv`
+- 42 rows, crew `SIM-A …` / `SIM-B …`, with a `halo_status` column. Not in the agent design doc → **lowest
+  priority** (Phase 4). If used: config maps `CREW_01 → SIM-A`, and our status must agree with `halo_status` on all 42 rows.
+
+### Not available
+Emergency scenarios, sleep stages, mood and cabin CO₂ are not in the data. Sleep is **estimated from
+`activity = in_bed` periods**. The morning activity is undefined ⚑.
+
+## 6. Contracts
+
+Status vocabulary: `normal | caution | alert`, plus `insufficient` for an indicator without baseline.
+Severity is `0–3`. External level names `watch` / `act` (threshold JSONs) map to `caution` / `alert`.
+
+### 6.1 Endpoints
+
+| Endpoint | Purpose | Owner |
+|---|---|---|
+| POST /api/v1/vitals | ingest one reading | Dhruv |
+| GET /api/v1/crew/{crew_id}/vitals/latest | latest reading + baseline comparison + score | Dhruv, calls Chris |
+| WS /ws/crew/{crew_id} | push readings, score changes, alerts | Dhruv |
+| **POST /api/v1/score** | reading window → `ScoreResult` | **Chris** |
+| **POST /api/v1/sos** | start an SOS session, return step 1 | **Chris** |
+| **POST /api/v1/sos/{session_id}/step** | submit `done` / `cannot_do` / `condition_changed`, return the next step | **Chris** |
+| **POST /api/v1/sos/{session_id}/classify** | free text → top-3 symptom candidates (shell) | **Chris** |
+| **POST /api/v1/agent/ask** | free question; with `session_id` it is limited to that checklist | **Chris** |
+| POST /api/v1/activity/morning | morning activity result, triggers the daily report | Dhruv or Chris ⚑ |
+| **GET /api/v1/crew/{crew_id}/daily-report?date=** | daily report | **Chris** |
+| **POST /api/v1/admin/mode** | toggle online/offline (demo) | **Chris** |
+
+`/classify` is an addition to the design doc: it keeps classification separate from session start.
+All of Chris's endpoints must first exist as **stubs returning fixed JSON** (Phase 0).
+
+### 6.2 `VitalsReading`
+```json
+{
+  "reading_id": "QR_DEMO_0001",
+  "crew_id": "CREW_01",
+  "timestamp": "2026-11-15T10:10:00Z",
+  "mission_day": 1,
+  "activity": "resting",
+  "heart_rate_bpm": 93.0, "resp_rate_bpm": 18.0,
+  "systolic_bp_mmhg": 162.0, "diastolic_bp_mmhg": 58.0,
+  "body_temp_c": 37.2, "spo2_pct": 97.0,
+  "blink_rate_per_min": null,
+  "new_reading": {"bp": true, "temp": false},
+  "measurement_origin": "master_csv_playback_not_camera",
+  "display_label": "Demo data - not measured from your camera"
+}
+```
+`new_reading` is derived from `bp_new_reading` / `temp_new_reading` and is used by M2.
+
+### 6.3 `ScoreResult`
+The team draft's fields are kept unchanged. `reading_id`, `indicators` and `reasons[].status/source/rule_id/text` are additions.
+```json
+{
+  "crew_id": "CREW_01",
+  "reading_id": "QR_DEMO_0001",
+  "as_of": "2026-11-15T10:10:00Z",
+  "status": "caution",
+  "severity": 2,
+  "confidence": 0.7,
+  "baseline_quality": "ok",
+  "engine": "rules-v0",
+  "data_origin": "demo_playback",
+  "indicators": [
+    {"metric": "heart_rate_bpm", "value": 93.0, "status": "caution", "deviation_mad": 2.1,
+     "baseline": {"median": 84.0, "sigma": 4.3, "n": 120, "group": "resting"},
+     "trend": {"direction": "rising", "slope_per_day": 3.1, "days_to_alert": 4.2},
+     "fresh_minutes": 0}
+  ],
+  "reasons": [
+    {"metric": "heart_rate_bpm", "value": 93.0, "baseline_median": 84.0, "deviation_mad": 2.1,
+     "direction": "high", "status": "caution", "source": "baseline", "rule_id": "z_band",
+     "text": "Resting heart rate 93 bpm is 2.1 robust SD above your baseline (84 bpm)."}
+  ]
+}
+```
+- `deviation_mad` = robust z = `(value − median) / sigma`, with `sigma = 1.4826 × max(MAD, floor)`.
+- `baseline_quality` ∈ `ok | partial | insufficient`.
+- `reasons[].source` ∈ `nasa | guideline | team_derived | baseline`.
+- `trend` may be `null`. `engine` names the implementation; swapping in an ML model only changes this field.
+
+### 6.4 `SosSession`
+```json
+{
+  "session_id": "sos_001",
+  "crew_id": "CREW_01",
+  "symptom": "breathing_difficulty",
+  "symptom_source": "picker",
+  "protocol_id": "breathing_v0",
+  "step": {"index": 1, "total": 6, "id": "b1", "text": "...", "source_ref": "...",
+           "options": ["done", "cannot_do", "condition_changed"]},
+  "vitals_snapshot": {"reading_id": "QR_DEMO_0001", "age_seconds": 40},
+  "score": {"status": "alert", "severity": 3},
+  "escalation": {"triggered": true, "reasons": ["severity_max"], "channel": "sms",
+                 "state": "queued_offline", "acknowledged": false},
+  "mode": "offline",
+  "disclaimer": "Decision support only. Not a diagnosis."
+}
+```
+- `symptom_source` ∈ `picker | llm`. If it is `llm`, the UI must get confirmation before the session advances.
+- `escalation.state` ∈ `not_needed | sending | sent | acknowledged | queued_offline | failed`.
+- `mode` ∈ `online | offline`.
+
+### 6.5 `DailyReport`
+```json
+{
+  "crew_id": "CREW_01",
+  "date": "2026-11-15",
+  "duty_status": "go",
+  "sleep": {"in_bed_minutes": null, "vs_baseline": null},
+  "morning_activity": {"completion_seconds": null, "vs_baseline_pct": null},
+  "vitals_trend": [{"metric": "heart_rate_bpm", "days": 3, "direction": "stable"}],
+  "environment_context": {"label": "Historical ISS radiation - May 2024", "is_personal_dose": false},
+  "watch_items": [],
+  "recommendations": [],
+  "summary_text": "...",
+  "summary_generated_by": "template",
+  "data_sources": ["demo_playback"],
+  "disclaimer": "Decision support only. Not a diagnosis."
+}
+```
+`duty_status` ∈ `go | caution | rest`. `summary_generated_by` ∈ `template | llm`.
+
+## 7. M2 + M3 — baseline and scoring (core)
+
+### 7.1 Baseline (personal, frozen)
+- Group by `crew × metric × activity`. Compute the median and MAD from `scenario=baseline` rows only, then
+  **freeze** the result (it acts as a pre-flight baseline). Later readings never update it, so slow drift
+  cannot be absorbed into the baseline.
+- Use only new measurements:
+  - SBP, DBP, resp, SpO2: rows where `new_reading.bp OR new_reading.temp` is true.
+  - Temperature: rows where `new_reading.temp` is true.
+  - HR: every row.
+  - Carried-forward values are not re-scored; they only lower freshness.
+- If an activity group has fewer than 3 points, fall back to the metric's pooled baseline across activities
+  (`baseline_quality: partial`). If that still has fewer than 3 points, the indicator is `insufficient`
+  (matches Kavya's lab-data rule).
+- MAD floors (`team_derived`, measurement resolution): temp 0.1 °C (switch to 0.2 if too sensitive),
+  SpO2 1 %, resp 1 /min, HR 1 bpm, BP 2 mmHg.
+
+### 7.2 Robust-z bands
+- `|deviation_mad| ≥ 2` → caution, `≥ 3` → alert (both in `scoring.yaml`).
+- Only the unfavourable direction counts: HR, resp and temp high; SpO2 low; BP both directions.
+- **Debounce:** an indicator reaches `alert` only after 2 consecutive new readings beyond the alert band.
+  One reading caps at `caution`.
+
+### 7.3 Trend
+- Window size and unit are configurable (`days | hours | readings`). Defaults: 3 days for reports, readings for tests.
+- Aggregate per step (median) within the current activity group, then fit a least-squares slope.
+- `|slope| ≥ 0.5 σ / day` → `rising` / `falling`, otherwise `stable`. An unfavourable direction adds a
+  `caution` reason (`source: baseline`).
+- `days_to_alert = (alert boundary − current value) / slope`. Include it only when it is > 0 and ≤ 14.
+
+### 7.4 Absolute red flags (`red_flags.yaml`)
+Red flags override the baseline and set the indicator to `alert`. Values are **provisional**: each rule has
+`verified: false` until the user confirms its source. Don't add more on your own.
+
+| rule_id | condition | source (to verify) |
+|---|---|---|
+| spo2_low | `spo2_pct < 90` | guideline |
+| fever | `body_temp_c >= 38.0` | guideline |
+| bp_crisis | `systolic_bp_mmhg >= 180` | guideline (AHA hypertensive crisis) |
+
+### 7.5 Aggregation and confidence
+- `status` is the worst indicator status. Severity: normal 0, caution 1 (one indicator) or 2 (two or more,
+  or any unfavourable trend), alert 3.
+- `confidence = baseline_term × freshness_term × completeness_term`:
+  - baseline_term: mean of `min(1, n/12)`
+  - freshness_term: 1 if the last new reading is ≤ 30 min old, falling linearly to 0 at 6 h
+  - completeness_term: `1 − missing_fraction`
+- Provide both `score(readings) -> list[ScoreResult]` (batch) and a stateful `Engine.update(reading) -> ScoreResult`
+  (for the WS feed). **They must give identical results** on the same data.
+
+## 8. M4 — Crew SOS (core state machine + optional shell)
+
+Kavya's four steps: **report → display → guide → alert**, plus a session log.
+
+### 8.1 Protocol JSON (M6 content, `protocols/*.json`)
+```json
+{
+  "protocol_id": "breathing_v0",
+  "symptom": "breathing_difficulty",
+  "title": "Breathing difficulty",
+  "source": {"title": null, "url": null},
+  "verified": false,
+  "start": "b1",
+  "steps": {
+    "b1": {"text": "[PLACEHOLDER — not medical guidance]", "source_ref": null,
+           "on": {"done": "b2", "cannot_do": "ESCALATE", "condition_changed": "b1_reassess"},
+           "show_vitals": ["spo2_pct", "resp_rate_bpm", "heart_rate_bpm"]}
+  },
+  "escalate_if_unresolved_after": "b4",
+  "red_flags": ["spo2_low"]
+}
+```
+- Next-step values are a step id, `ESCALATE` or `END`. `ESCALATE` triggers escalation **and the checklist
+  continues** at that step's `after_escalate` target (or the next step).
+- Until Kavya names the source ⚑, ship 2–3 protocols with placeholder text and `verified: false`.
+  **Do not write real first-aid steps yourself.**
+- A JSON-schema validator test checks every protocol: no dangling ids, every non-placeholder step has a `source_ref`.
+
+### 8.2 Session flow
+1. **Report:** `POST /sos` with `symptom` (picker), or with `free_text`, which goes through `/classify` →
+   top-3 candidates → crewmate confirms → the session starts.
+2. **Display:** attach the latest vitals (timestamp, `display_label`, age in seconds), the baseline comparison and the `ScoreResult`.
+3. **Guide:** one step at a time; options advance the state machine.
+4. **Alert:** evaluate the escalation conditions after every step and every new reading; emit an event to M7.
+5. **Log:** every step's time, action and vitals snapshot go into an append-only session log (JSONL),
+   exported when communication resumes.
+
+### 8.3 Escalation conditions (`escalation.yaml`, each can be toggled)
+- the score reaches max severity (3)
+- any red flag named in the protocol fires
+- the crewmate picks `cannot_do`, or an option marked `unresponsive`
+- the protocol's `escalate_if_unresolved_after` step is reached and the condition is not resolved
+- LLM classification confidence is low, or the problem is out of the checklist's scope
+- the latest reading is stale or missing (freshness_term < 0.2)
+
+### 8.4 M7 interface (don't build Twilio)
+`Notifier` protocol with `send(event) -> state`. Ship a `QueueNotifier`: offline it returns `queued_offline`,
+and the UI text says *"Ground will receive this in ~20 min. Continue the checklist."* Ship a `ConsoleNotifier` for dev.
+A `TwilioNotifier` is optional and only if the team confirms ⚑. Recipients come from config, never from user input.
+
+## 9. M5 — Daily report
+
+1. **Trigger:** `POST /activity/morning`, or a fixed time.
+2. **Collect:** the previous night's `in_bed` period (minutes, HR during it), morning activity time ⚑,
+   resting vitals, 3-day trends, and the radiation environment reference.
+3. **Score:** call M3.
+4. **Template first:** build all structured fields and a template `summary_text`. Default `duty_status`
+   mapping (`team_derived`): normal → `go`, caution → `caution`, alert → `rest`.
+5. **Shell rewrite (online):** the LLM receives **only the structured fields** and writes one paragraph.
+   Validate the result: every number in the text must appear in the fields. If validation fails, fall back
+   to the template and set `summary_generated_by: "template"`.
+6. Every number shown carries its source (`demo_playback`, face scan, NASA historical reference).
+
+## 10. M6 + shell — knowledge and LLM
+
+- `LLMClient` interface with `available() -> bool`. The provider and key come from env ⚑. Tests use `FakeLLM`.
+  Every call has a timeout (≤ 8 s) and falls back on error.
+- Orchestration: **LangGraph** router → `sos` / `ask` / `report` subgraphs. In offline mode the same graph
+  runs, with LLM nodes swapped for rule/template nodes.
+- Retrieval: local `sentence-transformers` + FAISS (or Chroma) over protocol steps and NASA public reference
+  chunks. Each chunk has an `id` and a `source`.
+- `/agent/ask` with `session_id`: the context is the current protocol text + latest vitals only, and the
+  answer must cite step ids. Without `session_id`: knowledge-base chunks only, with citations. If there is
+  nothing to cite, use the fixed "not covered" reply.
+- Classification output: `[{"symptom": "...", "confidence": 0.0–1.0}] × 3`, restricted to symptoms that have a protocol.
+- Speech-to-text happens in the browser (Web Speech API). The backend receives text only.
+
+## 11. Layout
+
+```
+halo_agent/
+  core/        config.py  models.py  baseline.py  trend.py  rules.py  score.py  engine.py
+  sos/         protocols.py  state_machine.py  escalation.py  session_log.py
+  report/      daily.py  templates.py
+  shell/       llm.py  classify.py  ask.py  rewrite.py  graph.py  retrieval.py
+  notify/      base.py  queue.py  console.py
+  api/         app.py  routes_score.py  routes_sos.py  routes_report.py  routes_admin.py  stubs.py
+  cli.py
+config/        scoring.yaml  red_flags.yaml  escalation.yaml  app.yaml  thresholds/*.json
+protocols/     *.json
+data/          qr_scan_demo_clean.csv  radiation_5min.csv  reference/…  SIMULATED_*.csv
+scripts/       make_drift_scenario.py  make_sos_scenario.py
+tests/  tests/fixtures/
+README.md
+```
+`core/` must not import from `shell/`. Add a test that enforces this.
+
+Environment: Python 3.11, `uv`, `pyproject.toml`. Deps: fastapi, pydantic>=2, pyyaml, uvicorn, pytest,
+httpx. Optional extras group `shell`: langgraph, sentence-transformers, faiss-cpu, plus the LLM SDK ⚑.
+The core must install and run without the `shell` extras.
+
+## 12. Phases (work in this order; feature freeze Sun 10:00)
+
+**Phase 0 — Sat early afternoon. Unblocks the team.**
+- Every endpoint of Chris's in §6.1 returns fixed JSON matching §6. Run it, then tell the user so the design group can wire screens.
+
+**Phase 1 — Sat afternoon. Core.**
+- CSV replay → frozen baseline → robust-z, debounce, red flags → `ScoreResult` (all six vitals), batch + `Engine.update`.
+- 2–3 placeholder protocols + SOS state machine + escalation + `QueueNotifier` + session log. **No LLM yet.**
+- Stop and show the user: one `ScoreResult` and one full SOS session trace.
+
+**Phase 2 — Sat evening. Shell.**
+- `LLMClient`, LangGraph router, `/classify`, `/agent/ask` (checklist-scoped), daily report template + LLM rewrite with validation.
+- Offline toggle wired through every feature.
+
+**Phase 3 — Sat late night. Demo data and extras.** Drop anything that isn't done.
+- `make_drift_scenario.py` → `SIMULATED_drift_7d.csv`: 7 days of slowly rising resting HR and falling
+  SpO2. No red flag fires; trend `caution` with a finite `days_to_alert` appears by day 4–5.
+- `make_sos_scenario.py` → `SIMULATED_sos_event.csv`: an acute SpO2 drop + HR rise that reaches `alert`.
+  **Pending Kavya's OK** (⚑ Q4).
+- Radiation `environment_context`, and Twilio if confirmed.
+
+**Phase 4 — only if everything else is done.** Bone density, confidence polish, local-LLM experiments.
+
+**Not before Sunday:** training an ML scoring model (keep the interface ready), building face-scan vital-sign
+algorithms, tuning a local LLM.
+
+## 13. Tests (definition of done)
+- Demo playback runs with no errors. Report the % of `normal` rows (expected high, with the BP red flag near the end).
+- Fixtures (SIMULATED): HR rising over several days, SpO2 falling, a single spike (stays `caution` because of debounce),
+  baseline with < 3 points, NaN values, MAD = 0.
+- `score()` and an `Engine.update()` replay produce identical output.
+- Every protocol validates. An SOS walkthrough reaches `END`. `cannot_do` escalates and the checklist continues.
+  Offline escalation ends in `queued_offline`.
+- Offline mode: `/classify` returns a picker fallback, `/agent/ask` returns the fixed reply, the report is
+  `template` — and **no network call is attempted** (assert with `FakeLLM`).
+- Report rewrite validation rejects text containing a number that is not in the fields.
+- Import test: `core/` never imports `shell/`.
+
+## 14. Open with the team (⚑) — don't block on them; use the defaults above
+1. **Ownership:** is the Agent officially Chris's, and does scoring stay with Chris?
+2. **Interfaces (Kavya, Dhruv):** CSV column names as the schema? Timestamp generation? Blink-rate field name? REST vs WS for the live feed?
+3. **Protocol source (Kavya):** which public, medically reviewed checklists? Which 2–3 symptoms for the demo?
+4. **Emergency data (Kavya):** a real public segment, or a scripted SIMULATED scenario clearly labelled?
+5. **BP values (Kavya):** baseline at 162/58 rising to SBP 189 — intentional?
+6. **Morning activity:** what is it, how is it timed, and which endpoint receives it?
+7. **Twilio:** use it? SMS only or calls too? Whose account and phone?
+8. **LLM:** which provider, who has the key, is there internet at the venue?
+9. **Submission time and demo length:** the design doc says a 1–2 min video, but the official rule on the
+   team map is a **video of 30 seconds or less** (or ≤ 7 slides), or no global judging. Confirm before recording.
+
+## 15. README must state
+- Every threshold, its source class and whether it is verified; every protocol's source and whether it is verified.
+- Which data is real, replayed, historical-environment or simulated.
+- What runs offline and what needs the LLM.
+- Skipped items and why.
+- "HALO is a prototype, not a medical device."
+- AI tools used during development (required by Space Apps).
