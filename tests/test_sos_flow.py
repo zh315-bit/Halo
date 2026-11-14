@@ -218,7 +218,8 @@ def test_vitals_ages_stale_and_missing(env):
     assert m["heart_rate_bpm"]["status"] == "ok" and m["heart_rate_bpm"]["age_seconds"] == 0
     assert m["systolic_bp_mmhg"]["measured_at"] == "2026-11-16T09:00:00Z"      # last NEW bp, not the carried row
     assert m["body_temp_c"]["status"] == "stale"                                # last new temp 08:00
-    assert m["blink_rate_per_min"] == {"value": None, "measured_at": None, "age_seconds": None, "status": "missing"}
+    assert m["blink_rate_per_min"] == {"value": None, "measured_at": None, "age_seconds": None, "status": "missing",
+                                       "note": None}                   # replayed demo: no camera note
     env["h"]["reading"] = aged(READING, 11 * 60)
     v = start(c)["vitals_snapshot"]
     assert v["stale"] is True and v["metrics"]["heart_rate_bpm"]["status"] == "stale"

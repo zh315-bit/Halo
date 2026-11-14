@@ -24,6 +24,7 @@ from .session_log import SessionLog
 from .state_machine import STEP_ACTIONS, TERMINAL, Session
 from .vitals import as_dict as _as_dict
 from .vitals import default_reading_fn, snapshot
+from . import live
 
 DISCLAIMER = "Decision support only. Not a diagnosis."
 END_TEXT = "Checklist complete. Choose Resolved or Hand off."
@@ -73,9 +74,10 @@ class SosService:
                  log: Optional[SessionLog] = None, rules: Optional[esc.EscalationConfig] = None,
                  mode_fn: Callable[[], str] = lambda: "online", now_fn: Callable[[], str] = _utc_now,
                  env_fn: Callable[[], str] = configured_env,
+                 scan_fn: Callable[[str], object] = live.default_scan_fn,
                  twilio: Optional[TwilioSender] = None):
         self.checklists = checklists if checklists is not None else load_all()
-        self.reading_fn = reading_fn
+        self.reading_fn, self.scan_fn = reading_fn, scan_fn
         self.score_fn, self.mode_fn, self.now, self.env_fn = score_fn, mode_fn, now_fn, env_fn
         self.log = log or SessionLog()
         self.rules = rules if rules is not None else esc.load_config()
@@ -241,6 +243,23 @@ class SosService:
         if snap["reading_id"] is None or (score is not None and score.get("reading_id") != snap["reading_id"]):
             score = None
         ctx["vitals"], ctx["score"] = snap, score
+        # §8.6: record every reading this session showed, and the crew's latest camera scan
+        used = ctx.setdefault("readings_used", {})
+        if snap["reading_id"] and snap["reading_id"] not in used:
+            used[snap["reading_id"]] = {"reading_id": snap["reading_id"], "timestamp": snap["timestamp"],
+                                        "data_origin": snap["data_origin"],
+                                        "measurement_origin": live._get(reading, "measurement_origin"),
+                                        "first_used_at": self.now()}
+        try:
+            record = self.scan_fn(s.crew_id)
+        except Exception:
+            record = None
+        if record is None:
+            record = live._get(reading, "scan_context")
+        scan = live.summarize(record, self.now())
+        ctx["scan"] = scan
+        if scan and scan.get("scan_id") not in ctx.setdefault("scans_used", {}):
+            ctx["scans_used"][scan.get("scan_id")] = scan
 
     def _brief(self, s: Session) -> Optional[dict]:
         sc = self._ctx[s.session_id].get("score")
@@ -314,6 +333,7 @@ class SosService:
                "protocol_id": s.checklist.protocol_id, "reason": reason, "step_id": reason.partition(":")[2] or None,
                "at": at, "text": REPORTED_TEXT}
         self._ctx[s.session_id]["reports"].append(rec)
+        rec.update(self._data_blocks(s))
         self.ground_reports.append(rec)
         self.log.append("ground_reports", rec)
         s.overlay("escalate", at, "system", reason=reason, level="report", report_id=rec["report_id"])
@@ -346,6 +366,16 @@ class SosService:
         ctx["logged"] = len(s.events)
         if s.state in TERMINAL:
             self.log.export(s.session_id, self.view(s))
+
+    def _data_blocks(self, s: Session) -> dict:
+        """§8.6: live camera data and replayed/simulated data used in this session, never mixed."""
+        ctx = self._ctx[s.session_id]
+        used = list(ctx.get("readings_used", {}).values())
+        cam = [dict(r) for r in used if r["data_origin"] == live.CAMERA_ORIGIN]
+        other = [dict(r) for r in used if r["data_origin"] != live.CAMERA_ORIGIN]
+        scans = [dict(x) for x in ctx.get("scans_used", {}).values()]
+        return {"live_data": {"label": live.LIVE_LABEL, "readings": cam, "scans": scans} if (cam or scans) else None,
+                "other_data": {"label": live.OTHER_LABEL, "readings": other} if other else None}
 
     # ---------- contract view (AGENTS.md §6.4 + additions) ----------
     def _step_view(self, s: Session) -> dict:
@@ -416,5 +446,7 @@ class SosService:
                 "reports": [dict(r) for r in reports],
                 "report_ui_message": REPORTED_TEXT if reports else None,
             },
+            "scan_context": ctx.get("scan"),
+            **self._data_blocks(s),
             "events": [dict(e) for e in s.events],
         }

@@ -165,6 +165,42 @@ class VitalMetric(_Strict):                                             # sos-v0
     measured_at: Optional[str]      # last NEW measurement of this metric (carry-forward excluded)
     age_seconds: Optional[float]
     status: Literal["ok", "stale", "missing"]
+    note: Optional[Literal["Not measured by camera scan"]] = None    # §8.6: camera scan cannot measure it
+
+
+class ScanContext(_Strict):                                             # §8.6 addition
+    label: Literal["Live camera measurement (experimental)"]
+    data_origin: Literal["camera_scan"]
+    scan_id: Optional[str]
+    scanned_at: Optional[str]
+    age_seconds: Optional[float]
+    heart_rate_bpm: Optional[float]          # null when the scan judged it unreliable
+    heart_quality: Optional[float]           # signal quality 0..1
+    breathing_brpm: Optional[float]
+    breathing_quality: Optional[float]
+    reaction_median_ms: Optional[float]
+    verdict: Optional[str]
+    scan_grade: Optional[str]
+    notes: list[str] = Field(default_factory=list)
+
+
+class UsedReading(_Strict):                                             # §8.6 addition
+    reading_id: str
+    timestamp: Optional[str]
+    data_origin: Optional[str]
+    measurement_origin: Optional[str]
+    first_used_at: str
+
+
+class LiveData(_Strict):                                                # §8.6 addition: live camera data only
+    label: Literal["Live camera measurement (experimental)"]
+    readings: list[UsedReading]
+    scans: list[ScanContext]
+
+
+class OtherData(_Strict):                                               # §8.6 addition: never live
+    label: Literal["Replayed demo or simulated data (not a live measurement)"]
+    readings: list[UsedReading]
 
 
 class VitalsSnapshot(_Strict):
@@ -229,6 +265,8 @@ class GroundReport(_Strict):                                            # sos-v2
     step_id: Optional[str]
     at: str
     text: Literal["Reported to flight surgeon"]
+    live_data: Optional["LiveData"] = None         # §8.6
+    other_data: Optional["OtherData"] = None       # §8.6
 
 
 class StepDone(_Strict):                                                # sos-v0 addition
@@ -266,6 +304,9 @@ class SosSession(_Strict):
     steps_done: list[StepDone] = Field(default_factory=list)
     score_reasons: list[str] = Field(default_factory=list)
     alert: Optional[SosAlert] = None
+    scan_context: Optional[ScanContext] = None     # §8.6: this crew's latest camera scan (experimental)
+    live_data: Optional[LiveData] = None           # §8.6: live readings + scans used in this session
+    other_data: Optional[OtherData] = None         # §8.6: replayed / simulated readings used, kept apart
     events: list[dict] = Field(default_factory=list)   # append-only log: seq, at, action, actor, state_from, state_to, …
 
 
@@ -470,6 +511,7 @@ class ModeResponse(_Strict):
 
 SosStep.model_rebuild()
 SosAlert.model_rebuild()
+GroundReport.model_rebuild()
 
 
 # ---------- admin replay (demo feed until M1; every reading goes through core Engine.update) ----------

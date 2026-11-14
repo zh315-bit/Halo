@@ -70,6 +70,11 @@ curl -s -X POST localhost:8000/api/v1/admin/mode -H 'Content-Type: application/j
 curl -s -X POST localhost:8000/api/v1/admin/mode -H 'Content-Type: application/json' -d '{"mission_env": "microgravity"}'
 ```
 
+Smoke test (in-process, nothing sent, no key): `uv run python scripts/smoke_sos.py` (add `--url
+http://localhost:8000` to test a running server). Its `scan` scenario posts a sample camera scan for `LIVE_01` and is
+skipped until `POST /api/v1/scan` exists. Live camera crews show "Live camera measurement (experimental)"; SpO₂ and
+blood pressure show as missing ("Not measured by camera scan").
+
 Session logs are written to `data/sos_sessions/` (git-ignored): one `.jsonl` per session, plus a `.json` export when
 it ends. Full contract: AGENTS.md §6.4 and §8.
 

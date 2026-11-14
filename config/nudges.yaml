@@ -8,3 +8,7 @@ priority:                  # red flag rule_id -> checklists, best first; unliste
 max_suggestions: 2         # checklist suggestions from red flags; `other` is always added last
 min_interval_s: 300        # team_derived: at most one new nudge per crew member in this window
 snooze_minutes: [5, 15, 30]
+# A z-band-only alert (no red flag) nudges only if the alerting vitals' baseline is at least this good:
+# ok (own activity group) | partial (pooled across activities) | insufficient. Red flags always nudge. team_derived:
+# avoids false alarms for a new (e.g. live camera) crew whose baseline is not built yet.
+z_band_min_baseline_quality: ok
