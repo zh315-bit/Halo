@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
+import logging
 import threading
 import time
 from collections import deque
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timedelta
-from typing import Optional
+from typing import Callable, Optional
 
 from .baseline import select_baseline
 from .config import ScoringConfig
@@ -38,6 +39,9 @@ class _CrewState:
     log: deque = field(default_factory=lambda: deque(maxlen=Engine.HISTORY_MAX))   # (reading, result)
 
 
+log = logging.getLogger("halo.core.engine")
+
+
 class Engine:
     name = "rules-v0"
     HISTORY_MAX = 6000            # (reading, result) pairs kept per crew for the daily report (~20 days at 5 min)
@@ -45,10 +49,34 @@ class Engine:
     def __init__(self, cfg: ScoringConfig, wall=time.monotonic):
         self.cfg = cfg
         self._wall = wall
+        self._listeners: list[Callable[[ScoreResult], None]] = []
         self._crews: dict[str, _CrewState] = {}
         self._lock = threading.Lock()
 
+    def add_listener(self, fn: Callable[[ScoreResult], None]) -> Callable[[], None]:
+        """Call fn(score) after every update (outside the Engine lock, so fn may call latest() etc.).
+        A listener that raises is logged and skipped; update() still returns its result. Returns a remover."""
+        with self._lock:
+            self._listeners.append(fn)
+
+        def remove() -> None:
+            with self._lock:
+                if fn in self._listeners:
+                    self._listeners.remove(fn)
+        return remove
+
     def update(self, r: VitalsReading) -> ScoreResult:
+        result = self._update(r)
+        with self._lock:
+            listeners = list(self._listeners)
+        for fn in listeners:
+            try:
+                fn(result)
+            except Exception:
+                log.exception("Engine listener %r failed; score %s kept", fn, result.reading_id)
+        return result
+
+    def _update(self, r: VitalsReading) -> ScoreResult:
         with self._lock:
             st = self._crews.setdefault(r.crew_id, _CrewState())
             if st.last_ts is not None and r.timestamp < st.last_ts:
