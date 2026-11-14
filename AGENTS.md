@@ -735,8 +735,12 @@ The core must install and run without the `shell` extras.
 **Phase 3 — Sat late night. Demo data and extras.** Drop anything that isn't done.
 - `make_drift_scenario.py` → `SIMULATED_drift_7d.csv`: 7 days of slowly rising resting HR and falling
   SpO2. No red flag fires; trend `caution` with a finite `days_to_alert` appears by day 4–5.
-- `make_sos_scenario.py` → `SIMULATED_sos_event.csv`: an acute SpO2 drop + HR rise that reaches `alert`.
-  **Pending Kavya's OK** (⚑ Q4).
+- `make_sos_scenario.py` → `SIMULATED_sos_event.csv` (**done**, ⚑ Q4 decided 2026-11-14: scripted SIMULATED
+  scenario, clearly labelled): crew `SIM_CREW_SOS`, 2-day calm baseline (no alert), then day 3 08:00 an acute event
+  while resting — SpO₂ 98 → 89 at 08:05 (the first alert carries only `spo2_low`) → 86, HR 72 → 118, resp 15 → 26,
+  SBP 118 → 138 (no `bp_crisis`, no `fever`). Seeded; the committed file equals a fresh run (tested). Smoke scenario
+  `sos_event`: replay → nudge (red flag, breathing_difficulty first) → accept → breathing checklist to END.
+  Demo scene `sos_event` for `config/demo.yaml` (main): docs/INTEGRATION.md "SOS event scene".
 - Radiation `environment_context`, and Twilio if confirmed.
 
 **Phase 4 — only if everything else is done.** Bone density, confidence polish, local-LLM experiments.
@@ -760,7 +764,8 @@ algorithms, tuning a local LLM.
 1. **Ownership:** is the Agent officially Chris's, and does scoring stay with Chris?
 2. **Interfaces (Kavya, Dhruv):** CSV column names as the schema? Timestamp generation? Blink-rate field name? REST vs WS for the live feed?
 3. **Protocol source (Kavya):** which public, medically reviewed checklists? Which 2–3 symptoms for the demo?
-4. **Emergency data (Kavya):** a real public segment, or a scripted SIMULATED scenario clearly labelled?
+4. **Emergency data (Kavya):** ~~a real public segment, or a scripted SIMULATED scenario clearly labelled?~~
+   Decided 2026-11-14: scripted SIMULATED (`data/SIMULATED_sos_event.csv`).
 5. **BP values (Kavya):** baseline at 162/58 rising to SBP 189 — intentional?
 6. **Morning activity:** what is it, how is it timed, and which endpoint receives it?
 7. **Twilio:** use it? SMS only or calls too? Whose account and phone?
