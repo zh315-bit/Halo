@@ -58,6 +58,7 @@ def test_dry_run_never_calls_twilio(make):
     s = c.post(f"/api/v1/sos/{s['session_id']}/step", json={"action": "cannot_do"}).json()
     assert fake.inits == [] and fake.calls == []
     assert s["alert"]["mode"] == "dry_run" and s["alert"]["sms_status"] == "dry_run"
+    assert s["escalation"]["state"] == "simulated" and "sent" not in {m["state"] for m in s["alert"]["messages"]}
     assert len(svc.dry_run.outbox) == 2
     assert all(m["sid"].startswith("DRYRUN-") for m in s["alert"]["messages"])
 
@@ -112,7 +113,7 @@ def test_offline_queues_then_flushes_when_online(make):
     assert s["step"]["id"] == "c2" and len(svc.queue.pending()) == 2
     c.post("/api/v1/admin/mode", json={"mode": "online"})
     g = c.get(f"/api/v1/sos/{s['session_id']}").json()
-    assert svc.queue.pending() == [] and {m["state"] for m in g["alert"]["messages"]} == {"sent"}
+    assert svc.queue.pending() == [] and {m["state"] for m in g["alert"]["messages"]} == {"simulated"}
     assert any(e["action"] == "alert_update" and e["actor"] == "dry_run" for e in g["events"])
 
 

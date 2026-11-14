@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 
-from .base import SENT, AlertMessage, SendResult, mask_number, mission_support_number
+from .base import SIMULATED, AlertMessage, SendResult, mask_number, mission_support_number
 
 log = logging.getLogger("halo.notify.dry_run")
 
@@ -21,6 +21,4 @@ class DryRunSender:
                   "channel": msg.channel, "body": msg.body, "message_id": msg.message_id}
         self.outbox.append(record)
         log.info("DRY RUN would send %s", record)
-        # State `sent` keeps the §6.4 vocabulary; alert.mode / alert.sms_status = dry_run tell the UI
-        # that nothing actually left the station.
-        return SendResult(SENT, self.name, sid=f"DRYRUN-{msg.message_id}")
+        return SendResult(SIMULATED, self.name, sid=f"DRYRUN-{msg.message_id}")

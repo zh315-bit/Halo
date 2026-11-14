@@ -215,9 +215,9 @@ The Phase 0 fields are unchanged; everything below `disclaimer` is a sos-v0 addi
 - `symptom_source` ∈ `picker | llm`. If it is `llm`, the UI must get confirmation before the session advances.
 - `step.options` ∈ `done | cannot_do | condition_changed | skip`. When the checklist is finished,
   `step.id = "END"`, `options = []`, `checklist_complete = true`; the crew then calls `/resolve`.
-- `escalation.state` ∈ `not_needed | sending | sent | acknowledged | queued_offline | failed`. In dry-run mode it
-  is `sent`; **the UI must show `alert.sms_status`** (`not_sent | sending | dry_run | sent | queued_offline | failed`)
-  so a dry run is never presented as a real delivery.
+- `escalation.state` ∈ `not_needed | sending | sent | acknowledged | queued_offline | failed | simulated`.
+  `simulated` (sos-v0 addition) = dry-run mode: nothing was sent, and it is never shown as `sent`.
+  `alert.sms_status` ∈ `not_sent | sending | dry_run | sent | queued_offline | failed` (`dry_run` ↔ `simulated`).
 - `mode` ∈ `online | offline`. `alert.mode` ∈ `dry_run | live | offline_queue`.
 - `state` ∈ `REPORTED | ALERTING | GUIDING | RESOLVED | HANDED_OFF`. Acknowledgement is an overlay
   (`alert.acknowledged_at`), not a state.
@@ -229,7 +229,9 @@ The Phase 0 fields are unchanged; everything below `disclaimer` is a sos-v0 addi
 - SOS endpoints (sos-v0): `GET /api/v1/sos/problem-types`, `POST /api/v1/sos` (`crew_id`, `symptom` | `free_text`,
   optional `note`), `GET /api/v1/sos/{id}` (polling), `POST /api/v1/sos/{id}/step` (`action`, optional `step_id`:
   mismatch → 409), `POST /api/v1/sos/{id}/ack` (`by`), `POST /api/v1/sos/{id}/resolve` (`outcome`:
-  `resolved | handed_off`). Illegal transition → 409, unknown session → 404, unknown symptom → 422.
+  `resolved | handed_off`), `POST /api/v1/sos/{id}/classify` (`free_text` → §10), `POST /api/v1/sos/{id}/confirm`
+  (`symptom`: the crewmate's choice; a different type switches the checklist).
+  Illegal transition → 409, unknown session → 404, unknown symptom → 422.
 
 ### 6.5 `DailyReport`
 ```json
@@ -335,8 +337,11 @@ steps:
 ### 8.2 Session flow and state machine
 `REPORTED → ALERTING → GUIDING → RESOLVED | HANDED_OFF`. The legal moves are one table
 (`state_machine.TRANSITIONS`); anything else → 409.
-1. **Report:** `POST /sos` with `symptom` (picker). With `free_text` (until the shell lands) the generic `other`
-   checklist starts immediately and the text is stored as `note`; Phase 2 adds classify → confirm → switch.
+1. **Report:** `POST /sos` with `symptom` (picker), or with `free_text`: the generic `other` checklist starts
+   immediately (nobody waits for the LLM) and the text is stored as `note`. Then `/classify` → top-3 candidates →
+   crewmate picks one → `/confirm`. A different type switches the checklist to its first step and logs
+   `checklist_switched` (`from_protocol`, `to_protocol`, `from_step`); `steps_done` keeps the history. The same type
+   logs `symptom_confirmed`. `symptom_source` = `llm` if the choice was one of the LLM candidates, else `picker`.
 2. **Alert + guide together:** the same request sends the `sos_reported` alert and returns step 1. Network sends
    run as background tasks, so guidance never waits for delivery.
 3. **Display:** latest vitals from the CSV replay (`sos/vitals.py`, until M1 has a latest-reading interface):
@@ -349,14 +354,14 @@ steps:
 7. **Log:** every event is appended to `data/sos_sessions/<id>.jsonl` (env `HALO_SOS_LOG_DIR`); on
    RESOLVED / HANDED_OFF the full session is exported to `<id>.json`.
 
-### 8.3 Escalation conditions (`sos/escalation.py` defaults; optional `config/escalation.yaml` toggles)
+### 8.3 Escalation conditions (`config/escalation.yaml`, validated at load; each can be toggled)
 - `sos_reported`: the SOS itself (once)
 - `severity_max`: score severity 3 (once)
 - `red_flag:<rule_id>`: a red flag named in the checklist fires with status `alert` (once per rule)
 - `cannot_do`: crewmate picks `cannot_do` on a step with `on_cannot_do: escalate` (every time)
 - `unresolved_after_step`: the `escalate_if_unresolved_after` step is left and the session is not resolved (once)
 - `stale_vitals`: freshness_term < 0.2 or no reading (once)
-- `low_classification_confidence`: Phase 2 (shell)
+- `low_classification_confidence`: best `/classify` candidate < `min_classification_confidence` (0.5, `team_derived`) (once)
 
 ### 8.4 M7 interface
 `AlertSender.send(AlertMessage) -> SendResult` (`halo_agent/notify/`). Recipients come only from env
@@ -364,7 +369,8 @@ steps:
 time, session id) — no medical text.
 - Offline (`mode=offline`) → `QueueSender`: `queued_offline`, UI text *"Ground will receive this in ~20 min.
   Continue the checklist."* The queue is flushed on the next SOS request made online.
-- Online, `ALERT_MODE=dry_run` (default) → `DryRunSender`: logs what would be sent, calls nothing.
+- Online, `ALERT_MODE=dry_run` (default) → `DryRunSender`: logs what would be sent, calls nothing;
+  message and `escalation.state` = `simulated`, `alert.sms_status` = `dry_run`.
 - Online, `ALERT_MODE=live` → `TwilioSender` (SMS only; optional extra `alert`). Env: `TWILIO_ACCOUNT_SID`,
   `TWILIO_AUTH_TOKEN`, `TWILIO_FROM_NUMBER`, `MISSION_SUPPORT_NUMBER`. One automatic retry; still failing →
   `failed`, UI "Alert not delivered. Continue the checklist.", checklist continues. Trial accounts can only text
@@ -386,16 +392,28 @@ time, session id) — no medical text.
 
 ## 10. M6 + shell — knowledge and LLM
 
-- `LLMClient` interface with `available() -> bool`. The provider and key come from env ⚑. Tests use `FakeLLM`.
-  Every call has a timeout (≤ 8 s) and falls back on error.
+- `LLMClient` (`shell/llm.py`): `available() -> bool`, `complete(system, user, timeout_s) -> str`. Provider and
+  key come from env (`HALO_LLM_PROVIDER`, `HALO_LLM_API_KEY`, `HALO_LLM_MODEL`) ⚑; until an adapter exists every
+  value maps to `NullLLM`. Tests use `FakeLLM`. **All calls go through `call_llm()`**, which returns the fallback
+  before touching the client when offline or unavailable; timeout `HALO_LLM_TIMEOUT_S` (≤ 8 s); errors fall back.
 - Orchestration: **LangGraph** router → `sos` / `ask` / `report` subgraphs. In offline mode the same graph
   runs, with LLM nodes swapped for rule/template nodes.
 - Retrieval: local `sentence-transformers` + FAISS (or Chroma) over protocol steps and NASA public reference
   chunks. Each chunk has an `id` and a `source`.
-- `/agent/ask` with `session_id`: the context is the current protocol text + latest vitals only, and the
-  answer must cite step ids. Without `session_id`: knowledge-base chunks only, with citations. If there is
-  nothing to cite, use the fixed "not covered" reply.
-- Classification output: `[{"symptom": "...", "confidence": 0.0–1.0}] × 3`, restricted to symptoms that have a protocol.
+- `/agent/ask` with `session_id` (sos-v0): the context is the **current step** (id, text, source) + latest vitals
+  values only. No LLM call if the step is the placeholder or has no real source, or the checklist is finished →
+  "The checklist doesn't cover this — contact ground." The answer is accepted only if it cites exactly the current
+  step id and every number in it appears in the context; otherwise the same fixed reply. Offline / no LLM →
+  "Not covered offline — follow the checklist". Without `session_id`: knowledge-base chunks only, with citations
+  (retrieval not built yet → fixed "not covered" reply, no LLM call). Unknown `session_id` → 404. Each ask is logged
+  as an `ask` event (question, `answered_by`, citations).
+  Response: `{answer, citations: [{kind: "checklist_step" | "kb_chunk", id}], session_id, answered_by: "llm" |
+  "fixed_reply", mode, disclaimer}`.
+- `/sos/{id}/classify` response: `{session_id, candidates, source: "llm" | "picker_fallback",
+  requires_confirmation: true, mode, low_confidence}`. `llm`: exactly 3 candidates
+  `[{"symptom", "confidence": 0.0–1.0}]`, best first, restricted to problem types that have a checklist (invented
+  types dropped, padded with the remaining types at 0.0). `picker_fallback` (offline, no LLM, timeout, unparsable
+  output): every problem type at confidence 0.0. Never auto-selected; logged as a `classify` event.
 - Speech-to-text happens in the browser (Web Speech API). The backend receives text only.
 
 ## 11. Layout

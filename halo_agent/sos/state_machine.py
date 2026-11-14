@@ -39,6 +39,10 @@ OVERLAYS: dict[str, tuple[str, ...]] = {
     "alert_update": STATES,
     "vitals_refresh": (GUIDING,),
     "note": STATES,
+    "classify": (ALERTING, GUIDING),
+    "ask": STATES,
+    "symptom_confirmed": (GUIDING,),
+    "checklist_switched": (GUIDING,),
 }
 
 
@@ -153,6 +157,23 @@ class Session:
         self._move(action, at, actor, step_id=cur.id, next_step=nxt,
                    escalate=reasons or None)
         return StepOutcome(reasons, cur.id, nxt)
+
+    def confirm_symptom(self, checklist: Checklist, at: str, actor: str = "crew",
+                        from_candidates: bool = False) -> bool:
+        """Crewmate confirms a problem type (after /classify or from the picker). Switching to another checklist
+        restarts guidance at its first step; steps already done stay in the history. Returns True if switched."""
+        if self.state != GUIDING:
+            raise IllegalTransition(self.state, "confirm_symptom")
+        self.symptom_source = "llm" if from_candidates else "picker"
+        if checklist.protocol_id == self.checklist.protocol_id:
+            self.overlay("symptom_confirmed", at, actor, symptom=checklist.symptom, symptom_source=self.symptom_source)
+            return False
+        old, old_step = self.checklist, self.current_step
+        self.checklist, self.current_step, self._unresolved_fired = checklist, checklist.start, False
+        self.overlay("checklist_switched", at, actor, from_protocol=old.protocol_id, to_protocol=checklist.protocol_id,
+                     from_step=old_step, step_id=self.current_step, symptom=checklist.symptom,
+                     symptom_source=self.symptom_source)
+        return True
 
     def acknowledge(self, at: str, by: str) -> bool:
         """Returns False (and logs nothing) if already acknowledged: ground may tap twice."""

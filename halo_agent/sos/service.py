@@ -13,7 +13,7 @@ from datetime import datetime, timezone
 from typing import Callable, Optional
 
 from halo_agent.notify import DryRunSender, QueueSender, TwilioSender, alert_mode
-from halo_agent.notify.base import SENDING, SENT, AlertMessage, SendResult, render_body
+from halo_agent.notify.base import SENDING, SIMULATED, AlertMessage, SendResult, render_body
 from halo_agent.notify.queue import UI_TEXT as QUEUED_UI_TEXT
 
 from . import escalation as esc
@@ -24,7 +24,7 @@ from .vitals import CsvReplayVitals
 
 DISCLAIMER = "Decision support only. Not a diagnosis."
 END_TEXT = "Checklist complete. Choose Resolved or Hand off."
-ONCE_ONLY = ("sos_reported", "severity_max", "stale_vitals", "unresolved_after_step")  # cannot_do repeats
+ONCE_ONLY = ("sos_reported", "severity_max", "stale_vitals", "unresolved_after_step", "low_classification_confidence")  # cannot_do repeats
 UI_TEXT = {
     "not_sent": None,
     "sending": "Sending alert to mission support…",
@@ -71,14 +71,14 @@ def default_score_fn(crew_id: str) -> Optional[dict]:
 class SosService:
     def __init__(self, checklists: Optional[dict[str, Checklist]] = None, vitals=None,
                  score_fn: Callable[[str], Optional[dict]] = default_score_fn,
-                 log: Optional[SessionLog] = None, rules: Optional[dict] = None,
+                 log: Optional[SessionLog] = None, rules: Optional[esc.EscalationConfig] = None,
                  mode_fn: Callable[[], str] = lambda: "online", now_fn: Callable[[], str] = _utc_now,
                  twilio: Optional[TwilioSender] = None):
         self.checklists = checklists if checklists is not None else load_all()
         self.vitals = vitals if vitals is not None else CsvReplayVitals()
         self.score_fn, self.mode_fn, self.now = score_fn, mode_fn, now_fn
         self.log = log or SessionLog()
-        self.rules = rules if rules is not None else esc.load_rules()
+        self.rules = rules if rules is not None else esc.load_config()
         self.dry_run, self.queue, self.twilio = DryRunSender(), QueueSender(), twilio or TwilioSender()
         self.sessions: dict[str, Session] = {}
         self._ctx: dict[str, dict] = {}          # session_id -> {vitals, score, messages, reasons, logged}
@@ -151,6 +151,56 @@ class SosService:
             self._flush_queue()
             return self.view(self._get(session_id))
 
+    # ---------- shell hooks (the shell runs in the API layer; sos never imports it) ----------
+    def symptoms(self) -> list[str]:
+        return list(self.checklists)
+
+    def require(self, session_id: str) -> None:
+        with self._lock:
+            self._get(session_id)
+
+    def record_classification(self, session_id: str, free_text: str, result: dict) -> list[Callable]:
+        """Log the /classify result; low confidence escalates (§8.3). Never changes the checklist by itself."""
+        with self._lock:
+            s = self._get(session_id)
+            at = self.now()
+            s.overlay("classify", at, "system", source=result["source"], candidates=result["candidates"],
+                      low_confidence=result.get("low_confidence"), free_text=free_text)
+            self._ctx[s.session_id]["candidates"] = [c["symptom"] for c in result["candidates"]] \
+                if result["source"] == "llm" else []
+            jobs = self._escalate(s, ["low_classification_confidence"], at) if result.get("low_confidence") else []
+            self._persist(s)
+            return jobs
+
+    def confirm_symptom(self, session_id: str, symptom: str, actor: str = "crew") -> dict:
+        if symptom not in self.checklists:
+            raise ValueError(f"unknown symptom `{symptom}` (allowed: {sorted(self.checklists)})")
+        with self._lock:
+            self._flush_queue()
+            s = self._get(session_id)
+            from_llm = symptom in self._ctx[s.session_id].get("candidates", [])
+            s.confirm_symptom(self.checklists[symptom], self.now(), actor, from_candidates=from_llm)
+            self._persist(s)
+            return self.view(s)
+
+    def ask_context(self, session_id: str) -> Optional[dict]:
+        """Only the current step + latest vitals values; None once the checklist is finished or ended."""
+        with self._lock:
+            s = self._get(session_id)
+            if s.state in TERMINAL or s.checklist_complete or s.current_step is None:
+                return None
+            st = s.checklist.step(s.current_step)
+            v = self._ctx[s.session_id].get("vitals") or {}
+            return {"step": {"id": st.id, "text": st.text, "source": st.source if st.has_source else None},
+                    "vitals": {k: m.get("value") for k, m in (v.get("metrics") or {}).items()}}
+
+    def record_ask(self, session_id: str, question: str, result: dict) -> None:
+        with self._lock:
+            s = self._get(session_id)
+            s.overlay("ask", self.now(), "crew", question=question, answered_by=result["answered_by"],
+                      citations=result["citations"])
+            self._persist(s)
+
     # ---------- internals ----------
     def _get(self, session_id: str) -> Session:
         s = self.sessions.get(session_id)
@@ -180,7 +230,7 @@ class SosService:
         ctx, jobs = self._ctx[s.session_id], []
         for r in reasons:
             key = r.split(":")[0]
-            if not self.rules.get(key, False):
+            if not self.rules.enabled(key):
                 continue
             if (key in ONCE_ONLY or key == "red_flag") and r in ctx["reasons"]:
                 continue
@@ -246,7 +296,7 @@ class SosService:
         last = msgs[-1] if msgs else None
         if last is None:
             sms_status = "not_sent"
-        elif last.state == SENT and last.sender == "dry_run":
+        elif last.state == SIMULATED:
             sms_status = "dry_run"
         else:
             sms_status = last.state

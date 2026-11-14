@@ -1,0 +1,15 @@
+# SOS escalation conditions (AGENTS.md §8.3). true = this condition sends an alert to mission support.
+# Every key must be present; unknown keys are refused at load time (halo_agent/sos/escalation.py).
+# Thresholds marked team_derived are workflow choices, not medical thresholds.
+
+rules:
+  sos_reported: true                    # the crew pressed SOS (sent once per session)
+  severity_max: true                    # ScoreResult severity reaches 3 (once)
+  red_flag: true                        # a red flag listed in the checklist fires with status alert (once per rule)
+  cannot_do: true                       # cannot_do on a step with on_cannot_do: escalate (every time)
+  unresolved_after_step: true           # the checklist's escalate_if_unresolved_after step is left unresolved (once)
+  stale_vitals: true                    # freshness_term below stale_freshness_below, or no reading (once)
+  low_classification_confidence: true   # shell classify: best candidate below min_classification_confidence
+
+stale_freshness_below: 0.2              # §8.3; freshness_term = 1 up to 30 min, linear to 0 at 6 h (§7.5)
+min_classification_confidence: 0.5      # team_derived

@@ -1,19 +1,20 @@
-"""Crew SOS endpoints (AGENTS.md §6.1, §6.4, §8). The SOS group is real (sos-v0); /classify and
-/agent/ask are still Phase 0 stubs until the shell is wired (Phase 2)."""
+"""Crew SOS endpoints (AGENTS.md §6.1, §6.4, §8, §10). The SOS state machine never imports the shell; this
+route layer calls the shell (classify / ask) and records the results on the session."""
 
 from __future__ import annotations
 
 from typing import Optional
 
-from fastapi import APIRouter, BackgroundTasks, HTTPException, Response
+from fastapi import APIRouter, BackgroundTasks, HTTPException
 
-from halo_agent.sos.service import SosService, UnknownSession
+from halo_agent.shell import ask, classify
+from halo_agent.shell.llm import LLMClient, get_llm as _env_llm
+from halo_agent.sos.service import DISCLAIMER, SosService, UnknownSession
 from halo_agent.sos.state_machine import IllegalTransition
 
-from . import stubs
 from .routes_admin import current_mode
 from .schemas import (AskRequest, AskResponse, ClassifyRequest, ClassifyResponse, ProblemType, SosAckRequest,
-                      SosResolveRequest, SosSession, SosStartRequest, SosStepRequest)
+                      SosConfirmRequest, SosResolveRequest, SosSession, SosStartRequest, SosStepRequest)
 
 router = APIRouter(prefix="/api/v1", tags=["sos"])
 
@@ -31,6 +32,19 @@ def get_service() -> SosService:
 def set_service(svc: Optional[SosService]) -> None:
     global _service
     _service = svc
+
+
+_llm: Optional[LLMClient] = None
+
+
+def get_llm() -> LLMClient:
+    """From env (⚑ Q8: no provider yet -> NullLLM). Tests inject FakeLLM with set_llm()."""
+    return _llm if _llm is not None else _env_llm()
+
+
+def set_llm(llm: Optional[LLMClient]) -> None:
+    global _llm
+    _llm = llm
 
 
 def _run(fn, *args, **kw):
@@ -86,14 +100,29 @@ def sos_resolve(session_id: str, req: SosResolveRequest) -> dict:
     return _run(get_service().end, session_id, req.outcome)
 
 
-# ---------- still Phase 0 stubs (Phase 2: shell) ----------
+# ---------- shell (LLM optional; every path has a deterministic fallback) ----------
 @router.post("/sos/{session_id}/classify", response_model=ClassifyResponse)
-def sos_classify(session_id: str, req: ClassifyRequest, response: Response) -> dict:
-    response.headers.update(stubs.STUB_HEADER)
-    return stubs.classify(session_id, current_mode())
+def sos_classify(session_id: str, req: ClassifyRequest, bg: BackgroundTasks) -> dict:
+    svc = get_service()
+    _run(svc.require, session_id)
+    mode = current_mode()
+    out = classify.classify(req.free_text, svc.symptoms(), get_llm(), mode, svc.rules.min_classification_confidence)
+    _schedule(bg, _run(svc.record_classification, session_id, req.free_text, out))
+    return {"session_id": session_id, "mode": mode, **out}
+
+
+@router.post("/sos/{session_id}/confirm", response_model=SosSession)
+def sos_confirm(session_id: str, req: SosConfirmRequest) -> dict:
+    """The crewmate picks one problem type. A different type switches the checklist (event checklist_switched)."""
+    return _run(get_service().confirm_symptom, session_id, req.symptom)
 
 
 @router.post("/agent/ask", response_model=AskResponse)
-def agent_ask(req: AskRequest, response: Response) -> dict:
-    response.headers.update(stubs.STUB_HEADER)
-    return stubs.ask(req.session_id, current_mode())
+def agent_ask(req: AskRequest) -> dict:
+    svc, mode = get_service(), current_mode()
+    ctx = _run(svc.ask_context, req.session_id) if req.session_id else None
+    out = ask.ask(req.question, ctx, get_llm(), mode)
+    if req.session_id:
+        _run(svc.record_ask, req.session_id, req.question, out)
+    return {**out, "citations": [{"kind": "checklist_step", "id": c} for c in out["citations"]],
+            "session_id": req.session_id, "mode": mode, "disclaimer": DISCLAIMER}

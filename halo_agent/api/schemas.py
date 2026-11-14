@@ -106,7 +106,8 @@ class ScoreRequest(_Strict):
 # `skip` added in sos-v0 (team decision D). Existing values unchanged.
 StepOption = Literal["done", "cannot_do", "condition_changed", "skip"]
 SosState = Literal["REPORTED", "ALERTING", "GUIDING", "RESOLVED", "HANDED_OFF"]
-DeliveryState = Literal["not_needed", "sending", "sent", "acknowledged", "queued_offline", "failed"]
+# `simulated` added: dry-run mode, nothing was actually sent.
+DeliveryState = Literal["not_needed", "sending", "sent", "acknowledged", "queued_offline", "failed", "simulated"]
 
 
 class SosStep(_Strict):
@@ -250,6 +251,11 @@ class ClassifyResponse(_Strict):
     source: Literal["llm", "picker_fallback"]
     requires_confirmation: Literal[True]
     mode: Mode
+    low_confidence: bool = False          # sos-v0: best candidate below min_classification_confidence -> escalates
+
+
+class SosConfirmRequest(_Strict):         # sos-v0: crewmate confirms one problem type after /classify (or picker)
+    symptom: str
 
 
 class AskRequest(_Strict):

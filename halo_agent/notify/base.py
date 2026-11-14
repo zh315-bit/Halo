@@ -11,7 +11,8 @@ from dataclasses import dataclass, field
 from typing import Optional, Protocol
 
 # Delivery states use the §6.4 escalation vocabulary.
-SENDING, SENT, QUEUED_OFFLINE, FAILED = "sending", "sent", "queued_offline", "failed"
+# `simulated` = dry run: nothing left the station (never shown as `sent`).
+SENDING, SENT, QUEUED_OFFLINE, FAILED, SIMULATED = "sending", "sent", "queued_offline", "failed", "simulated"
 
 
 @dataclass
