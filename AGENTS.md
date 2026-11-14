@@ -553,15 +553,25 @@ content**: suggestions are derived from the checklists' `red_flags`.
   chunks. Each chunk has an `id` and a `source`.
 - `/agent/ask` with `session_id` (sos-v0): the context is the **current step** (id, text, `ref`, source titles) +
   latest vitals values only; the reviewer `note` is not sent. No LLM call if the step is the placeholder or has no
-  source, or the checklist is finished → "The checklist doesn't cover this — contact ground." The answer is
-  accepted only if it cites exactly the current step id, every number in it appears in the context, it repeats
-  no word the question introduced that the step does not use (e.g. a drug name), and it contains no dose word
-  (mg, tablet, dose, …) absent from the step; otherwise the same fixed reply. Offline / no LLM →
+  source, or the checklist is finished → "The checklist doesn't cover this — contact ground." **Guards** (all must
+  pass, `shell/ask.py rejection()`): cites exactly the current step id; every number appears in the context; no
+  drug name from `config/ask_guard.yaml` (blocklist + drug-name suffixes) and no dose word unless the step text
+  uses it; none of the drug names or dose expressions the question brought in. Failing → the fixed reply only.
+  **AI explanation (decided 2026-11-14):** when the model sets `not_covered: true` but its restatement passes every
+  guard, `answer` is the fixed reply and `explanation = {source: "llm", label: "AI explanation", text, citations}`
+  is shown underneath. A covered answer that passes is the `answer` itself (`answered_by: "llm"`, no explanation).
+  **Consistency:** Claude Opus 5.5 takes no `temperature` (sampling parameters return 400), so each client keeps a
+  memo keyed on (model, exact prompt incl. step and vitals): the same question on the same step shows the same
+  result, `not_covered` flag included, for the life of the process. Errors/timeouts are not memoised.
+  `/classify` is memoised the same way (text case/space-insensitive). Live check (costs money, skipped by
+  default): `HALO_LIVE_LLM=1 … pytest tests/test_sos_llm_live.py`. Offline / no LLM →
   "Not covered offline — follow the checklist". Without `session_id`: knowledge-base chunks only, with citations
   (retrieval not built yet → fixed "not covered" reply, no LLM call). Unknown `session_id` → 404. Each ask is logged
   as an `ask` event (question, `answered_by`, citations).
   Response: `{answer, citations: [{kind: "checklist_step" | "kb_chunk", id, ref, sources: [{key, title, url,
-  medical}]}], session_id, answered_by: "llm" | "fixed_reply", mode, disclaimer}`.
+  medical}]}], session_id, answered_by: "llm" | "fixed_reply", mode, disclaimer, explanation: null | {source: "llm",
+  label: "AI explanation", text, citations}}`. The `ask` event also logs `not_covered`, `rejected` (guard that
+  failed) and the explanation text.
 - `/sos/{id}/classify` response: `{session_id, candidates, source: "llm" | "picker_fallback",
   requires_confirmation: true, mode, low_confidence}`. `llm`: exactly 3 candidates
   `[{"symptom", "confidence": 0.0–1.0}]`, best first, restricted to problem types that have a checklist (invented

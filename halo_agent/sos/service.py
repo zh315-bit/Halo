@@ -205,8 +205,10 @@ class SosService:
     def record_ask(self, session_id: str, question: str, result: dict) -> None:
         with self._lock:
             s = self._get(session_id)
+            exp = result.get("explanation")
             s.overlay("ask", self.now(), "crew", question=question, answered_by=result["answered_by"],
-                      citations=result["citations"])
+                      citations=result["citations"], not_covered=result.get("not_covered"),
+                      rejected=result.get("rejected"), explanation=exp["text"] if exp else None)
             self._persist(s)
 
     # ---------- internals ----------

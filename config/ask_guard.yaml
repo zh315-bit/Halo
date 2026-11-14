@@ -1,0 +1,60 @@
+# /agent/ask output guard (AGENTS.md §3.1, §3.3, team_policy: HALO never names a drug or dose).
+# This is a BLOCKLIST only: an LLM answer that contains any of these words is discarded (fixed reply shown).
+# It never adds medical content. Matching is case-insensitive, whole word. A word that appears in the current
+# step's own text is not blocked there (the step text is shown verbatim anyway).
+drug_names:
+  - aspirin
+  - acetylsalicylic
+  - asa
+  - ibuprofen
+  - advil
+  - motrin
+  - naproxen
+  - acetaminophen
+  - paracetamol
+  - tylenol
+  - nitroglycerin
+  - nitroglycerine
+  - nitro
+  - gtn
+  - epinephrine
+  - adrenaline
+  - epipen
+  - naloxone
+  - narcan
+  - morphine
+  - fentanyl
+  - codeine
+  - oxycodone
+  - ketamine
+  - diphenhydramine
+  - benadryl
+  - promethazine
+  - scopolamine
+  - ondansetron
+  - zofran
+  - albuterol
+  - salbutamol
+  - atropine
+  - lidocaine
+  - amiodarone
+  - heparin
+  - warfarin
+  - clopidogrel
+  - insulin
+  - prednisone
+  - dexamethasone
+  - antibiotic
+  - antibiotics
+  - antihistamine
+  - painkiller
+  - painkillers
+  - opioid
+  - opioids
+  - sedative
+# Dose words: blocked in an answer unless the step text itself uses them.
+dose_words: [mg, mcg, µg, ug, milligram, milligrams, microgram, micrograms, ml, millilitre, milliliter, tablet,
+             tablets, pill, pills, capsule, capsules, dose, doses, dosage, puff, puffs, drops, iu, units]
+# Words ending like this are treated as drug names too (catches names missing from the list), whole word >= 7 letters.
+drug_suffixes: [pril, olol, sartan, statin, cillin, mycin, cycline, floxacin, azole, prazole, dipine, caine, profen,
+                oxetine, azepam, zolam, triptan, mab, tidine, setron, terol, sone, olone, parin, xaban, codone, morphone]

@@ -159,11 +159,16 @@ def agent_ask(req: AskRequest) -> dict:
     if req.session_id:
         _run(svc.record_ask, req.session_id, req.question, out)
     step = (ctx or {}).get("step") or {}
-    cites = [{"kind": "checklist_step", "id": c, "ref": step.get("ref") if c == step.get("id") else None,
-              "sources": [{k: s[k] for k in ("key", "title", "url", "medical")} for s in step.get("sources", [])]
-              if c == step.get("id") else []} for c in out["citations"]]
-    return {**out, "citations": cites,
-            "session_id": req.session_id, "mode": mode, "disclaimer": DISCLAIMER}
+
+    def cite(ids):
+        return [{"kind": "checklist_step", "id": c, "ref": step.get("ref") if c == step.get("id") else None,
+                 "sources": [{k: s[k] for k in ("key", "title", "url", "medical")} for s in step.get("sources", [])]
+                 if c == step.get("id") else []} for c in ids]
+    exp = out.get("explanation")
+    if exp:
+        exp = {**exp, "citations": cite(exp["citations"])}
+    return {"answer": out["answer"], "citations": cite(out["citations"]), "answered_by": out["answered_by"],
+            "explanation": exp, "session_id": req.session_id, "mode": mode, "disclaimer": DISCLAIMER}
 
 
 # ---------- §8.5 proactive nudge ----------

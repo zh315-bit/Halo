@@ -5,7 +5,12 @@ a checklist. Offline / no LLM / bad output -> the full picker (`source: picker_f
 
 from __future__ import annotations
 
+import copy
+import hashlib
 import json
+import threading
+import weakref
+from collections import OrderedDict
 from typing import Optional
 
 from .llm import LLMClient, call_llm, extract_json
@@ -54,12 +59,38 @@ def parse(raw: Optional[str], symptoms: list[str]) -> Optional[list[dict]]:
     return out
 
 
+_memos: "weakref.WeakKeyDictionary" = weakref.WeakKeyDictionary()   # one memo per client instance
+_memo_lock = threading.Lock()
+
+
+def clear_cache() -> None:
+    with _memo_lock:
+        _memos.clear()
+
+
 def classify(free_text: str, symptoms: list[str], llm: LLMClient, mode: str,
              min_confidence: float) -> dict:
-    raw = call_llm(llm, SYSTEM, _prompt(free_text, symptoms), mode)
+    """Same text + same problem types -> same candidates (memoised after the first model answer; the model takes
+    no temperature, so repeat calls are not guaranteed identical otherwise)."""
+    prompt = _prompt(free_text, symptoms)
+    norm = _prompt(" ".join(free_text.split()).lower(), symptoms)        # key only: case/space-insensitive
+    key = hashlib.sha256(f"{getattr(llm, 'model', '')}|{norm}".encode()).hexdigest()
+    with _memo_lock:
+        hit = _memos.setdefault(llm, OrderedDict()).get(key)
+    if hit is not None and mode != "offline" and llm.available():
+        out = copy.deepcopy(hit)
+        out["low_confidence"] = out["candidates"][0]["confidence"] < min_confidence
+        return out
+    raw = call_llm(llm, SYSTEM, prompt, mode)
     cands = parse(raw, symptoms) if raw is not None else None
     if cands is None:
         return {"candidates": picker(symptoms), "source": "picker_fallback", "requires_confirmation": True,
                 "low_confidence": False}
-    return {"candidates": cands, "source": "llm", "requires_confirmation": True,
-            "low_confidence": cands[0]["confidence"] < min_confidence}
+    out = {"candidates": cands, "source": "llm", "requires_confirmation": True,
+           "low_confidence": cands[0]["confidence"] < min_confidence}
+    with _memo_lock:
+        _memo = _memos.setdefault(llm, OrderedDict())
+        _memo[key] = copy.deepcopy(out)
+        while len(_memo) > 256:
+            _memo.popitem(last=False)
+    return out
