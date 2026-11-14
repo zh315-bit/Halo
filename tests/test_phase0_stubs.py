@@ -41,22 +41,16 @@ def test_morning_activity(client):
     assert client.post("/api/v1/activity/morning", json={"crew_id": "CREW_01", "date": "bad"}).status_code == 422
 
 
-def test_sos_flow(client):
+def test_sos_is_real_now(client):
+    # sos-v0 replaced the Phase 0 SOS stub; its flows are tested in tests/test_sos_*.py. Only the contract here.
     s = _ok(client.post("/api/v1/sos", json={"crew_id": "CREW_01", "symptom": "breathing_difficulty"}),
-            S.SosSession)
-    assert s.step.index == 1 and s.disclaimer == DISCLAIMER and s.symptom_source == "picker"
-    for action, idx in [("done", 2), ("cannot_do", 2), ("condition_changed", 1)]:
-        n = _ok(client.post(f"/api/v1/sos/{s.session_id}/step", json={"action": action}), S.SosSession)
-        assert n.step.index == idx
+            S.SosSession, stub=False)
+    assert s.disclaimer == DISCLAIMER and s.symptom_source == "picker"
     assert client.post("/api/v1/sos", json={"crew_id": "CREW_01"}).status_code == 422
 
 
-def test_sos_free_text_needs_confirmation(client):
-    s = _ok(client.post("/api/v1/sos", json={"crew_id": "CREW_01", "free_text": "hard to breathe"}),
-            S.SosSession)
-    assert s.symptom_source == "llm"
-    c = _ok(client.post(f"/api/v1/sos/{s.session_id}/classify", json={"free_text": "hard to breathe"}),
-            S.ClassifyResponse)
+def test_classify_stub(client):
+    c = _ok(client.post("/api/v1/sos/sos_001/classify", json={"free_text": "hard to breathe"}), S.ClassifyResponse)
     assert len(c.candidates) == 3 and c.requires_confirmation
 
 
