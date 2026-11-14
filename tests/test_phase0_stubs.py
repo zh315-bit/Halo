@@ -83,8 +83,8 @@ def test_daily_report(client):
 
 
 def test_offline_toggle_propagates(client):
-    r = client.post("/api/v1/admin/mode", json={"mode": "offline"})
-    assert r.json() == {"mode": "offline", "source": "runtime_toggle"}
+    r = client.post("/api/v1/admin/mode", json={"mode": "offline"}).json()   # sos-v2 adds mission_env fields
+    assert (r["mode"], r["source"]) == ("offline", "runtime_toggle")
     s = client.post("/api/v1/sos", json={"crew_id": "CREW_01", "symptom": "breathing_difficulty"}).json()
     sid = s["session_id"]
     assert s["mode"] == "offline" and s["escalation"]["state"] == "queued_offline"

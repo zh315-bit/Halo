@@ -40,7 +40,7 @@ def test_toggle_off_cannot_do(tmp_path):
     rows = load_rows()
     svc = service_mod.SosService(vitals=CsvReplayVitals(rows, clock=lambda: rows[-1]["ts"]), score_fn=lambda c: None,
                                  log=SessionLog(tmp_path), rules=parse_config(d))
-    s, _ = svc.start("CREW_01", "chest_pain")
+    s, _ = svc.start("CREW_01", "other")
     s, _ = svc.step(s["session_id"], "cannot_do")
-    assert s["step"]["id"] == "c2"                          # checklist still continues
+    assert s["step"]["id"] == "o2"                          # checklist still continues (o1 is microgravity only)
     assert "cannot_do" not in s["escalation"]["reasons"] and len(s["alert"]["messages"]) == 1

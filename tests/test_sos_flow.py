@@ -48,17 +48,19 @@ def step(c, s, action, **kw):
 
 
 # ---------- full walks ----------
-@pytest.mark.parametrize("symptom", ["chest_pain", "injury", "breathing_difficulty", "other"])
+@pytest.mark.parametrize("symptom", ["chest_pain", "breathing_difficulty", "fainting", "bleeding_injury", "other"])
 def test_every_problem_type_walks_to_resolved(env, symptom):
     c = env["c"]
     s = start(c, symptom)
-    assert s["state"] == "GUIDING" and s["step"]["index"] == 1 and s["review_status"] == "demo_unreviewed"
+    assert s["state"] == "GUIDING" and s["step"]["index"] == 1
+    assert s["review_status"] == "sourced_unreviewed" and s["review_label"] == "Sourced, not medically reviewed"
+    assert s["mission_env"] == "partial_gravity" and s["show_vitals"]
     assert [e["action"] for e in s["events"][:3]] == ["report", "start_alert", "escalate"]
-    n = s["step"]["total"]
-    for i in range(n):
+    n = 0
+    while not s["checklist_complete"]:
         s = step(c, s, "done", step_id=s["step"]["id"]).json()
-    assert s["checklist_complete"] and s["step"]["id"] == "END" and s["step"]["options"] == []
-    assert len(s["steps_done"]) == n
+        n += 1
+    assert s["step"]["id"] == "END" and s["step"]["options"] == [] and len(s["steps_done"]) == n
     s = c.post(f"/api/v1/sos/{s['session_id']}/resolve", json={}).json()
     assert s["state"] == "RESOLVED" and s["ended_at"]
     exported = json.loads((env["dir"] / f"{s['session_id']}.json").read_text())
@@ -67,42 +69,75 @@ def test_every_problem_type_walks_to_resolved(env, symptom):
     assert [json.loads(x)["seq"] for x in jsonl] == list(range(1, len(s["events"]) + 1))
 
 
+def test_step_view_shows_sources_ref_note(env):
+    s = start(env["c"], "chest_pain")
+    st = s["step"]
+    assert st["id"] == "c0" and st["type"] == "escalate" and st["ref"] == "JSC-48031 p.1-36 (contact Surgeon)"
+    assert [x["key"] for x in st["sources"]] == ["nasa_medcl", "mlp_heart_attack"]
+    assert all(x["title"] and x["url"].startswith("https://") for x in st["sources"])
+    assert "escalate_step:c0" in s["escalation"]["reasons"]
+    for _ in range(5):                                            # c0 c1g c2 c3 c4 -> c5
+        s = step(env["c"], s, "done").json()
+    assert s["step"]["id"] == "c5" and s["step"]["note"].startswith("HALO shows the latest vitals")
+    s = step(env["c"], s, "done").json()                          # c6: team_policy is not medical
+    assert {x["key"]: x["medical"] for x in s["step"]["sources"]} == {"team_policy": False, "nasa_medcl": True}
+    s = step(env["c"], step(env["c"], s, "done").json(), "done").json()      # c8
+    assert "[N — TBD]" in s["step"]["text"]
+
+
 def test_cannot_do_escalates_and_checklist_continues(env):
     c = env["c"]
     s = start(c, "chest_pain")
-    s = step(c, s, "done").json()                   # c1 -> c2
-    s = step(c, s, "cannot_do").json()              # c2 cannot_do -> escalate, continue at c3
-    assert s["step"]["id"] == "c3" and s["state"] == "GUIDING"
-    assert "cannot_do" in s["escalation"]["reasons"]
-    assert [m["reason"] for m in s["alert"]["messages"]] == ["sos_reported", "cannot_do"]
+    s = step(c, s, "done").json()                   # c0 -> c1g (partial_gravity)
+    assert s["step"]["id"] == "c1g"
+    s = step(c, s, "cannot_do").json()              # c1g cannot_do -> escalate, continue at c2
+    assert s["step"]["id"] == "c2" and s["state"] == "GUIDING"
+    assert [m["reason"] for m in s["alert"]["messages"]] == ["sos_reported", "escalate_step:c0", "cannot_do"]
     s = step(c, s, "cannot_do").json()              # a second cannot_do sends a second message
     assert [m["reason"] for m in s["alert"]["messages"]].count("cannot_do") == 2
 
 
-def test_cannot_do_routes_to_step_without_escalation(env):
+def test_cannot_do_routes_to_step_without_cannot_do_reason(env):
     c = env["c"]
-    s = start(c, "injury")
-    s = step(c, s, "done").json()                    # i1 -> i2
-    s = step(c, s, "cannot_do").json()               # i2 on_cannot_do: i4
-    assert s["step"]["id"] == "i4" and "cannot_do" not in s["escalation"]["reasons"]
+    s = start(c, "bleeding_injury")                  # h1 (h0 is microgravity only)
+    for _ in range(2):
+        s = step(c, s, "done").json()                # h1 -> h2 -> h3
+    s = step(c, s, "cannot_do").json()               # h3 on_cannot_do: h_tourniquet (an escalate step)
+    assert s["step"]["id"] == "h_tourniquet"
+    assert "cannot_do" not in s["escalation"]["reasons"] and "escalate_step:h_tourniquet" in s["escalation"]["reasons"]
 
 
-def test_unresolved_after_step_fires_once(env):
+def test_check_warning_sign_escalates(env):
     c = env["c"]
-    s = start(c, "other")                            # escalate_if_unresolved_after: o3
-    for _ in range(3):
-        s = step(c, s, "done").json()
-    assert s["escalation"]["reasons"].count("unresolved_after_step") == 1
+    s = start(c, "other")
+    assert s["step"]["type"] == "check" and s["step"]["on_condition_changed_means"] == "warning_sign"
+    s = step(c, s, "condition_changed").json()
+    assert s["step"]["id"] == "o2" and "warning_sign:o0" in s["escalation"]["reasons"]
+
+
+def test_unresolved_after_step_fires_once():
+    from halo_agent.sos.protocols import parse_checklist, parse_sources
+    from halo_agent.sos.state_machine import Session as S
+    src = parse_sources({"sources": {"a": {"title": "A", "url": None, "kind": "x"}}})
+    cl = parse_checklist({"protocol_id": "u", "symptom": "other", "title": "U", "escalate_if_unresolved_after": "u2",
+                          "steps": [{"id": f"u{i}", "type": "action", "text": "t", "source": "a"} for i in (1, 2, 3)]},
+                         src)
+    s = S("x", "CREW_01", cl)
+    s.report("t"); s.start_alert("t"); s.start_guide("t")
+    reasons = [r for _ in range(3) for r in s.step("done", "t").escalate_reasons]
+    assert reasons == ["unresolved_after_step"]
 
 
 def test_condition_changed_stays_and_refreshes_vitals(env):
     c = env["c"]
     s = start(c)
+    for _ in range(3):
+        s = step(c, s, "done").json()                # c0 c1g c2 -> c3 (action, no on_condition_changed)
     s = step(c, s, "condition_changed").json()
-    assert s["step"]["id"] == "c1"
+    assert s["step"]["id"] == "c3"
     assert any(e["action"] == "vitals_refresh" for e in s["events"])
     s = step(c, s, "skip").json()
-    assert s["step"]["id"] == "c2" and s["steps_done"][-1]["action"] == "skip"
+    assert s["step"]["id"] == "c4" and s["steps_done"][-1]["action"] == "skip"
 
 
 def test_hand_off(env):
@@ -117,13 +152,13 @@ def test_illegal_transitions_return_409(env):
     c = env["c"]
     s = start(c)
     sid = s["session_id"]
-    assert step(c, s, "done", step_id="c3").status_code == 409            # stale double tap
+    assert step(c, s, "done", step_id="c3").status_code == 409            # stale double tap (current c0)
     c.post(f"/api/v1/sos/{sid}/resolve", json={})
     assert step(c, s, "done").status_code == 409                          # after RESOLVED
     assert c.post(f"/api/v1/sos/{sid}/resolve", json={}).status_code == 409
     s2 = start(c, "other")
-    for _ in range(4):
-        step(c, s2, "done")
+    while not s2["checklist_complete"]:
+        s2 = step(c, s2, "done").json()
     assert step(c, s2, "done").status_code == 409                         # checklist complete
     assert c.get("/api/v1/sos/nope").status_code == 404
     assert step(c, {"session_id": "nope"}, "done").status_code == 404
@@ -160,7 +195,7 @@ def test_ack_is_overlay_and_idempotent(env):
     assert a["alert"]["ack_by"] == "capcom" and a["alert"]["acknowledged_at"]
     b = c.post(f"/api/v1/sos/{sid}/ack", json={"by": "someone"}).json()
     assert b["alert"]["ack_by"] == "capcom" and len(b["events"]) == len(a["events"])
-    assert step(c, s, "done").json()["step"]["id"] == "c2"                # ack does not interrupt guidance
+    assert step(c, s, "done").json()["step"]["id"] == "c1g"               # ack does not interrupt guidance
 
 
 # ---------- vitals display ----------
@@ -216,11 +251,11 @@ def test_score_severity_and_red_flag_escalate(env):
         {"rule_id": "spo2_low", "status": "alert", "text": "SpO2 below red flag"}]}
     s = start(env["c"], "breathing_difficulty")
     assert s["score"] == {"status": "alert", "severity": 3}
-    assert s["escalation"]["reasons"] == ["sos_reported", "severity_max", "red_flag:spo2_low"]
+    assert s["escalation"]["reasons"] == ["sos_reported", "severity_max", "red_flag:spo2_low", "escalate_step:b0"]
     assert s["score_reasons"] == ["SpO2 below red flag"]
-    s = step(env["c"], s, "done").json()      # same conditions again: not re-sent
-    assert len(s["alert"]["messages"]) == 3
-    s2 = start(env["c"], "chest_pain")        # spo2_low is not in this checklist's red_flags
+    s = step(env["c"], s, "done").json()      # same conditions again: not re-sent (b0 -> b2, no escalate step)
+    assert len(s["alert"]["messages"]) == 4
+    s2 = start(env["c"], "bleeding_injury")   # spo2_low is not in this checklist's red_flags
     assert "red_flag:spo2_low" not in s2["escalation"]["reasons"]
 
 

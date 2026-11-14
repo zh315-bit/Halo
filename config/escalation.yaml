@@ -7,6 +7,8 @@ rules:
   severity_max: true                    # ScoreResult severity reaches 3 (once)
   red_flag: true                        # a red flag listed in the checklist fires with status alert (once per rule)
   cannot_do: true                       # cannot_do on a step with on_cannot_do: escalate (every time)
+  escalate_step: true                   # a checklist step of type escalate is reached (every time)
+  warning_sign: true                    # condition_changed on a step whose on_condition_changed is escalate (every time)
   unresolved_after_step: true           # the checklist's escalate_if_unresolved_after step is left unresolved (once)
   stale_vitals: true                    # freshness_term below stale_freshness_below, or no reading (once)
   low_classification_confidence: true   # shell classify: best candidate below min_classification_confidence

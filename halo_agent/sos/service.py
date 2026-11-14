@@ -17,6 +17,7 @@ from halo_agent.notify.base import SENDING, SIMULATED, AlertMessage, SendResult,
 from halo_agent.notify.queue import UI_TEXT as QUEUED_UI_TEXT
 
 from . import escalation as esc
+from .mission_env import configured_env
 from .protocols import END, Checklist, load_all
 from .session_log import SessionLog
 from .state_machine import STEP_ACTIONS, TERMINAL, Session
@@ -73,10 +74,11 @@ class SosService:
                  score_fn: Callable[[str], Optional[dict]] = default_score_fn,
                  log: Optional[SessionLog] = None, rules: Optional[esc.EscalationConfig] = None,
                  mode_fn: Callable[[], str] = lambda: "online", now_fn: Callable[[], str] = _utc_now,
+                 env_fn: Callable[[], str] = configured_env,
                  twilio: Optional[TwilioSender] = None):
         self.checklists = checklists if checklists is not None else load_all()
         self.vitals = vitals if vitals is not None else CsvReplayVitals()
-        self.score_fn, self.mode_fn, self.now = score_fn, mode_fn, now_fn
+        self.score_fn, self.mode_fn, self.now, self.env_fn = score_fn, mode_fn, now_fn, env_fn
         self.log = log or SessionLog()
         self.rules = rules if rules is not None else esc.load_config()
         self.dry_run, self.queue, self.twilio = DryRunSender(), QueueSender(), twilio or TwilioSender()
@@ -87,7 +89,8 @@ class SosService:
     # ---------- public API ----------
     def problem_types(self) -> list[dict]:
         return [{"symptom": c.symptom, "title": c.title, "protocol_id": c.protocol_id,
-                 "review_status": c.review_status, "steps": len(c.steps)} for c in self.checklists.values()]
+                 "review_status": c.review_status, "review_label": c.review_label, "steps": len(c.steps)}
+                for c in self.checklists.values()]
 
     def start(self, crew_id: str, symptom: Optional[str] = None, free_text: Optional[str] = None,
               note: Optional[str] = None, actor: str = "crew") -> tuple[dict, list[Callable]]:
@@ -100,7 +103,8 @@ class SosService:
         with self._lock:
             self._flush_queue()
             sid = f"sos_{uuid.uuid4().hex[:8]}"
-            s = Session(sid, crew_id, self.checklists[symptom], symptom_source="picker", note=note)
+            s = Session(sid, crew_id, self.checklists[symptom], symptom_source="picker", note=note,
+                        mission_env=self.env_fn())
             self.sessions[sid] = s
             self._ctx[sid] = {"messages": [], "reasons": [], "logged": 0}
             at = self.now()
@@ -108,7 +112,7 @@ class SosService:
             s.start_alert(at)                       # alert first, but delivery never blocks guidance
             self._refresh(s)
             jobs = self._escalate(s, ["sos_reported"] + self._context_reasons(s), at)
-            s.start_guide(at)
+            jobs += self._escalate(s, s.start_guide(at), at)
             self._persist(s)
             return self.view(s), jobs
 
@@ -172,16 +176,17 @@ class SosService:
             self._persist(s)
             return jobs
 
-    def confirm_symptom(self, session_id: str, symptom: str, actor: str = "crew") -> dict:
+    def confirm_symptom(self, session_id: str, symptom: str, actor: str = "crew") -> tuple[dict, list[Callable]]:
         if symptom not in self.checklists:
             raise ValueError(f"unknown symptom `{symptom}` (allowed: {sorted(self.checklists)})")
         with self._lock:
             self._flush_queue()
             s = self._get(session_id)
             from_llm = symptom in self._ctx[s.session_id].get("candidates", [])
-            s.confirm_symptom(self.checklists[symptom], self.now(), actor, from_candidates=from_llm)
+            at = self.now()
+            jobs = self._escalate(s, s.confirm_symptom(self.checklists[symptom], at, actor, from_candidates=from_llm), at)
             self._persist(s)
-            return self.view(s)
+            return self.view(s), jobs
 
     def ask_context(self, session_id: str) -> Optional[dict]:
         """Only the current step + latest vitals values; None once the checklist is finished or ended."""
@@ -191,7 +196,10 @@ class SosService:
                 return None
             st = s.checklist.step(s.current_step)
             v = self._ctx[s.session_id].get("vitals") or {}
-            return {"step": {"id": st.id, "text": st.text, "source": st.source if st.has_source else None},
+            c = s.checklist
+            # The reviewer `note` is deliberately left out: it is not an instruction.
+            return {"step": {"id": st.id, "text": st.text, "ref": st.ref,
+                             "sources": [c.sources[k].as_dict() for k in st.sources]},
                     "vitals": {k: m.get("value") for k, m in (v.get("metrics") or {}).items()}}
 
     def record_ask(self, session_id: str, question: str, result: dict) -> None:
@@ -282,13 +290,19 @@ class SosService:
     # ---------- contract view (AGENTS.md §6.4 + additions) ----------
     def _step_view(self, s: Session) -> dict:
         c = s.checklist
+        applicable = [x.id for x in c.steps if x.applies(s.mission_env)]   # "i of n" counts this env's steps only
         if s.checklist_complete:
-            return {"index": len(c.steps), "total": len(c.steps), "id": END, "text": END_TEXT,
+            return {"index": len(applicable), "total": len(applicable), "id": END, "text": END_TEXT,
                     "source_ref": None, "options": [], "type": None}
         st = c.step(s.current_step)
-        return {"index": c.position(st.id), "total": len(c.steps), "id": st.id, "text": st.text,
-                "source_ref": st.source if st.has_source else None,
-                "options": [] if s.state in TERMINAL else list(STEP_ACTIONS), "type": st.type}
+        srcs = [c.sources[k] for k in st.sources]
+        return {"index": applicable.index(st.id) + 1, "total": len(applicable), "id": st.id, "text": st.text,
+                "source_ref": st.ref or (srcs[0].title if srcs else None),
+                "options": [] if s.state in TERMINAL else list(STEP_ACTIONS), "type": st.type,
+                "sources": [x.as_dict() for x in srcs], "ref": st.ref, "note": st.note,
+                "env": list(st.env) if st.env else None, "adaptation": st.adaptation,
+                "gravity_dependent": st.gravity_dependent,
+                "on_condition_changed_means": "warning_sign" if st.type == "check" else None}
 
     def view(self, s: Session) -> dict:
         ctx = self._ctx[s.session_id]
@@ -317,6 +331,11 @@ class SosService:
             # ---- additions ----
             "state": s.state,
             "review_status": s.checklist.review_status,
+            "review_label": s.checklist.review_label,
+            "mission_env": s.mission_env,
+            "show_vitals": list(s.checklist.show_vitals),
+            "scope_note": s.checklist.scope_note,
+            "scope_sources": [s.checklist.sources[k].as_dict() for k in s.checklist.scope_sources],
             "checklist_title": s.checklist.title,
             "checklist_complete": s.checklist_complete,
             "started_at": s.started_at, "ended_at": s.ended_at, "note": s.note,

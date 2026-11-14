@@ -1,0 +1,99 @@
+# Converted from sos_checklists_v2.yaml (DRAFT, sourced, NOT medically reviewed). Step text is verbatim.
+# Field meanings: halo_agent/sos/protocols.py and AGENTS.md §8.1.
+#   type: action | check (condition_changed = YES, a warning sign) | escalate (fires every time reached)
+#   next: step id | END.  on_cannot_do / on_condition_changed: step id | escalate | END
+#   on_cannot_do: escalate was added where v2 left it unspecified (AGENTS.md §8.3 default: cannot_do escalates).
+#   env: steps that don't apply to the mission environment are followed through `next`.
+#   source: keys into _sources.yaml; ref = page/section. note = reviewer note (details panel, not an instruction).
+#   [N — TBD]: numbers the sources don't give. Do not fill in without a source.
+# Medication policy (team_policy): HALO never names a drug or dose.
+# JSC-48031 page numbers come from a public OCR copy; verify against the PDF before citing on stage.
+
+protocol_id: bleeding_v2
+symptom: bleeding_injury
+title: "Injury with bleeding"
+review_status: sourced_unreviewed
+verified: false
+show_vitals: ["heart_rate_bpm", "systolic_bp_mmhg", "diastolic_bp_mmhg"]
+red_flags: []
+start: h0
+steps:
+  - id: h0
+    type: action
+    env: ["microgravity"]
+    text: "Anchor yourself and your crewmate."
+    source: nasa_medcl
+    ref: "JSC-48031 p.1-6"
+    next: h1
+    on_cannot_do: escalate
+  - id: h1
+    type: action
+    text: "Put on gloves. Keep absorbent gauze ready and protect their eyes and face."
+    source: ["nasa_medcl", "ug_blood"]
+    ref: "JSC-48031 p.4-30 (gloves); section 7 contaminant cleanup"
+    note: "In microgravity blood forms a dome over the wound; arterial bleeding can spray floating droplets."
+    next: h2
+    on_cannot_do: escalate
+  - id: h2
+    type: action
+    text: "Press directly on the wound with gauze."
+    source: ["nasa_medcl", "mlp_bleeding"]
+    ref: "JSC-48031 p.4-30, p.1-27"
+    next: h3
+    on_cannot_do: escalate
+  - id: h3
+    type: action
+    text: "Keep pressing until it stops. If blood soaks through, add more gauze on top. Don't remove the first layer."
+    source: mlp_bleeding
+    next: h4
+    on_cannot_do: h_tourniquet
+  - id: h4
+    type: action
+    text: "Don't remove anything stuck in the wound and don't probe it."
+    source: ["nasa_medcl", "mlp_bleeding"]
+    ref: "JSC-48031 p.1-35"
+    next: h5
+    on_cannot_do: escalate
+  - id: h5
+    type: check
+    text: "Escalate if ANY: bleeding won't stop; wound on the abdomen, chest, neck, pelvis or groin; signs of shock (confusion, pale or clammy skin, fast pulse, dizziness, weakness, short of breath). Press 'condition changed' if YES."
+    source: ["mlp_bleeding", "nasa_medcl"]
+    ref: "JSC-48031 p.1-44 (Shock)"
+    next: h6
+    on_cannot_do: escalate
+    on_condition_changed: h_severe
+  - id: h6
+    type: action
+    text: "Once bleeding is controlled: bandage it, photograph the wound, and contact the flight surgeon about closing it."
+    source: nasa_medcl
+    ref: "JSC-48031 p.4-30 to 4-31 (Lacerations, Major)"
+    next: h7
+    on_cannot_do: escalate
+  - id: h7
+    type: action
+    text: "Bag all used gauze and gloves, and recheck their vitals."
+    source: nasa_medcl
+    ref: "JSC-48031 section 7 (Contaminant Cleanup)"
+    next: END
+    on_cannot_do: escalate
+  - id: h_severe
+    type: escalate
+    text: "Alert the CMO and flight surgeon. Keep them still and warm, and check vitals. IV fluids only per the onboard Medical Checklist and flight surgeon."
+    source: ["nasa_medcl", "mlp_bleeding"]
+    ref: "JSC-48031 p.1-44 (Shock: prevent heat loss, IV)"
+    next: h_severe_g
+    on_cannot_do: escalate
+  - id: h_severe_g
+    type: action
+    env: ["partial_gravity", "post_landing"]
+    text: "If there's no head, neck, back or leg injury, lay them flat and raise their feet about 30 cm."
+    source: mlp_bleeding
+    next: h3
+    on_cannot_do: escalate
+  - id: h_tourniquet
+    type: escalate
+    text: "Only if pressure fails and bleeding is life-threatening: apply a tourniquet 5–7.5 cm (2–3 in) above the wound, not on a joint, and record the time."
+    source: mlp_bleeding
+    note: "Not found in JSC-48031 excerpts read so far; Earth source only."
+    next: h5
+    on_cannot_do: escalate

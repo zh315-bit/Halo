@@ -14,8 +14,8 @@ from typing import Optional
 import yaml
 
 CONFIG = Path(__file__).resolve().parents[2] / "config" / "escalation.yaml"
-RULES = ("sos_reported", "severity_max", "red_flag", "cannot_do", "unresolved_after_step", "stale_vitals",
-         "low_classification_confidence")
+RULES = ("sos_reported", "severity_max", "red_flag", "cannot_do", "escalate_step", "warning_sign",
+         "unresolved_after_step", "stale_vitals", "low_classification_confidence")
 FRESH_FULL_S, FRESH_ZERO_S = 30 * 60, 6 * 3600   # §7.5 freshness_term
 
 

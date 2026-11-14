@@ -201,27 +201,37 @@ The Phase 0 fields are unchanged; everything below `disclaimer` is a sos-v0 addi
 {
   "session_id": "sos_1a2b3c4d",
   "crew_id": "CREW_01",
-  "symptom": "breathing_difficulty",
+  "symptom": "chest_pain",
   "symptom_source": "picker",
-  "protocol_id": "breathing_v0",
-  "step": {"index": 1, "total": 6, "id": "b1", "text": "[PLACEHOLDER — not medical guidance]", "source_ref": null,
-           "options": ["done", "cannot_do", "condition_changed", "skip"], "type": "action"},
+  "protocol_id": "chest_pain_v2",
+  "step": {"index": 1, "total": 11, "id": "c0", "type": "escalate",
+           "text": "Alert the CMO and the flight surgeon now. Don't wait to see if the pain goes away.",
+           "source_ref": "JSC-48031 p.1-36 (contact Surgeon)", "ref": "JSC-48031 p.1-36 (contact Surgeon)",
+           "sources": [{"key": "nasa_medcl", "title": "NASA Medical Checklist, JSC-48031 Rev H (Space Shuttle, 2001)",
+                        "url": "https://…", "kind": "spaceflight_procedure", "medical": true}],
+           "note": null, "env": null, "adaptation": null, "gravity_dependent": null,
+           "on_condition_changed_means": null,
+           "options": ["done", "cannot_do", "condition_changed", "skip"]},
   "vitals_snapshot": {"reading_id": "QR_DEMO_0276", "age_seconds": 0, "timestamp": "2026-11-16T09:05:00Z",
                       "display_label": "Demo data - not measured from your camera", "data_origin": "demo_playback",
                       "stale": false,
                       "metrics": {"body_temp_c": {"value": 37.3, "measured_at": "2026-11-16T08:00:00Z",
                                                   "age_seconds": 3900, "status": "stale"}}},
   "score": null,
-  "escalation": {"triggered": true, "reasons": ["sos_reported", "cannot_do"], "channel": "sms",
+  "escalation": {"triggered": true, "reasons": ["sos_reported", "escalate_step:c0"], "channel": "sms",
                  "state": "queued_offline", "acknowledged": false},
   "mode": "offline",
   "disclaimer": "Decision support only. Not a diagnosis.",
   "state": "GUIDING",
-  "review_status": "demo_unreviewed",
-  "checklist_title": "Breathing difficulty",
+  "review_status": "sourced_unreviewed",
+  "review_label": "Sourced, not medically reviewed",
+  "mission_env": "partial_gravity",
+  "show_vitals": ["heart_rate_bpm", "systolic_bp_mmhg", "diastolic_bp_mmhg", "spo2_pct", "resp_rate_bpm"],
+  "scope_note": null, "scope_sources": [],
+  "checklist_title": "Chest pain or pressure",
   "checklist_complete": false,
   "started_at": "2026-11-14T17:30:56Z", "ended_at": null, "note": null,
-  "steps_done": [{"step_id": "b1", "action": "done", "at": "…", "actor": "crew"}],
+  "steps_done": [],
   "score_reasons": [],
   "alert": {"mode": "offline_queue", "sms_status": "queued_offline", "call_status": "not_implemented",
             "acknowledged_at": null, "ack_by": null,
@@ -233,6 +243,14 @@ The Phase 0 fields are unchanged; everything below `disclaimer` is a sos-v0 addi
 }
 ```
 - `symptom_source` ∈ `picker | llm`. If it is `llm`, the UI must get confirmation before the session advances.
+- `symptom` ∈ `chest_pain | breathing_difficulty | fainting | bleeding_injury | other` (sos-v2).
+- `step.type` ∈ `action | check | escalate`. For `check`, `on_condition_changed_means = "warning_sign"`: the UI
+  labels that button as "warning sign present". `step.index` / `total` count only the steps that apply in
+  `mission_env`. `step.sources[]` (title, url, kind, `medical`), `step.ref` and the checklist's
+  `review_label` must be shown; `team_policy` sources have `medical: false`. `step.note` and `scope_note` go in a
+  details panel and are **never shown as instructions**. Text such as `[N — TBD]` is shown verbatim.
+- `review_status` ∈ `demo_unreviewed | sourced_unreviewed | reviewed`; `review_label` is the banner text.
+- `mission_env` ∈ `microgravity | partial_gravity | post_landing`, fixed when the session starts.
 - `step.options` ∈ `done | cannot_do | condition_changed | skip`. When the checklist is finished,
   `step.id = "END"`, `options = []`, `checklist_complete = true`; the crew then calls `/resolve`.
 - `escalation.state` ∈ `not_needed | sending | sent | acknowledged | queued_offline | failed | simulated`.
@@ -252,6 +270,9 @@ The Phase 0 fields are unchanged; everything below `disclaimer` is a sos-v0 addi
   `resolved | handed_off`), `POST /api/v1/sos/{id}/classify` (`free_text` → §10), `POST /api/v1/sos/{id}/confirm`
   (`symptom`: the crewmate's choice; a different type switches the checklist).
   Illegal transition → 409, unknown session → 404, unknown symptom → 422.
+- `POST /api/v1/admin/mode` (sos-v2 additions): body `{mode?, mission_env?}` (at least one); response adds
+  `mission_env` and `mission_env_source` (`config | runtime_toggle`). The env switch applies to sessions started
+  after it. Default `mission_env` from `config/app.yaml` (`partial_gravity`), env override `HALO_MISSION_ENV`.
 
 ### 6.5 `DailyReport`
 ```json
@@ -343,30 +364,49 @@ Kavya's four steps: **report → display → guide → alert**, plus a session l
 (`protocols.py`, `state_machine.py`, `escalation.py`, `vitals.py`, `session_log.py`, `service.py`). No LLM.
 
 ### 8.1 Checklists (M6 content, `config/checklists/*.yaml`)
-One YAML per problem type: `chest_pain`, `injury`, `breathing_difficulty`, `other` (generic). Parsed outside core
-(`sos/protocols.py`) and validated **at load time**; an invalid file is refused.
+Converted verbatim from the team's `sos_checklists_v2.yaml` (DRAFT, sourced, **not medically reviewed**).
+One YAML per problem type (`chest_pain`, `breathing_difficulty`, `fainting`, `bleeding_injury`, `other`) plus the
+shared `config/checklists/_sources.yaml` table. Parsed outside core (`sos/protocols.py`) and validated **at load
+time**; an invalid file is refused.
 ```yaml
-protocol_id: breathing_v0
-symptom: breathing_difficulty
-title: Breathing difficulty
-source: {title: null, url: null}
+protocol_id: chest_pain_v2
+symptom: chest_pain
+title: "Chest pain or pressure"
+review_status: sourced_unreviewed     # declared; the effective value can only be stricter
 verified: false
-escalate_if_unresolved_after: b4
-red_flags: [spo2_low]
+show_vitals: [heart_rate_bpm, systolic_bp_mmhg, ...]
+red_flags: [bp_crisis, spo2_low]
+start: c0
+# optional: scope_note, scope_source, escalate_if_unresolved_after
 steps:
-  - id: b1
-    type: action            # action | observe | confirm
-    text: "[PLACEHOLDER — not medical guidance]"
-    source: TBD
-    on_cannot_do: escalate  # step id | escalate
-    # optional: next (step id | END, default = following step), on_condition_changed (step id, default = stay)
+  - id: c1
+    type: action                      # action | check | escalate
+    env: [microgravity]               # optional; absent = every environment
+    text: "Anchor yourself and your crewmate ..."
+    source: nasa_medcl                # key or list of keys from _sources.yaml
+    ref: "JSC-48031 p.1-6 (Patient Restraint)"
+    # optional: note (reviewer note), adaptation, gravity_dependent
+    next: c1g                         # step id | END (default: following step)
+    on_cannot_do: escalate            # step id | escalate | END (default escalate, AGENTS §8.3)
+    # on_condition_changed: step id | escalate | END (required for check; absent on action = stay)
 ```
-- `on_cannot_do: escalate` triggers escalation **and the checklist continues** at `next`.
-- `review_status` is `demo_unreviewed` if any step's `source` is missing, empty or `TBD`, or `verified` is not
-  true. The UI always shows "Demo content — not medically reviewed" for `demo_unreviewed`.
-- Validation: unique ids, no dangling `on_cannot_do` / `next` / `on_condition_changed` / `escalate_if_unresolved_after`,
-  valid `type`, known `symptom`, all four problem types present, and **every non-placeholder step needs a real
-  `source`**. All texts are the placeholder until Kavya names the source ⚑. **Do not write real first-aid steps.**
+- `type: escalate`: escalation fires **every time the step is entered**; the checklist continues at `next`.
+- `type: check`: `condition_changed` = YES, a warning sign is present → `on_condition_changed`.
+- A target of `escalate` (v2 `ESCALATE`) on `on_cannot_do` / `on_condition_changed` escalates and continues at
+  the step's `next`.
+- **Environment:** a step whose `env` does not include the session's `mission_env` is skipped by following its
+  `next` until an applicable step (or END); the same rule applies to every target (`next`, `on_cannot_do`,
+  `on_condition_changed`) and to the checklist `start`.
+- `review_status` (effective) = stricter of the declared value and the content: `demo_unreviewed` if any step has
+  no source; `sourced_unreviewed` if all cite `_sources.yaml`; `reviewed` only if declared reviewed and
+  `verified: true`. The UI always shows `review_label` (e.g. "Sourced, not medically reviewed").
+- `team_policy` sources are citations but not medical sources (`medical: false`). Medication policy (team_policy):
+  HALO never names a drug or dose.
+- Validation: unique ids, known keys only, valid `type` / `env` / `show_vitals`, every source key exists, no
+  dangling target, `next` cannot be `escalate`, every check has `on_condition_changed`, no loop through
+  non-applicable steps in any environment, every non-placeholder step cites a source, all five problem types present.
+- ⚑ JSC-48031 page numbers come from a public OCR copy; verify against the PDF before citing on stage.
+- ⚑ v2 has no `adaptation` / `gravity_dependent` values yet; the fields are supported and passed through.
 
 ### 8.2 Session flow and state machine
 `REPORTED → ALERTING → GUIDING → RESOLVED | HANDED_OFF`. The legal moves are one table
@@ -381,8 +421,9 @@ steps:
 3. **Display:** latest vitals from the CSV replay (`sos/vitals.py`, until M1 has a latest-reading interface):
    per-metric value, last new measurement time, age, `ok | stale | missing`, plus `display_label`.
    Score only via `from halo_agent.core import score_latest`; `None` → `score: null`.
-4. **Guide:** one step at a time. `done` / `skip` → `next`; `cannot_do` → `on_cannot_do`; `condition_changed` →
-   re-read vitals + score, go to `on_condition_changed` or stay.
+4. **Guide:** one step at a time, in the session's `mission_env`. `done` / `skip` → `next`; `cannot_do` →
+   `on_cannot_do`; `condition_changed` → re-read vitals + score, go to `on_condition_changed` or stay. Every
+   target is env-resolved (§8.1); the step event records `skipped_to` when steps were skipped.
 5. **Alert:** escalation conditions are evaluated at start and after every step.
 6. **Ack:** `POST /sos/{id}/ack` (manual, demo) sets the overlay; idempotent; allowed after the session ended.
 7. **Log:** every event is appended to `data/sos_sessions/<id>.jsonl` (env `HALO_SOS_LOG_DIR`); on
@@ -393,6 +434,8 @@ steps:
 - `severity_max`: score severity 3 (once)
 - `red_flag:<rule_id>`: a red flag named in the checklist fires with status `alert` (once per rule)
 - `cannot_do`: crewmate picks `cannot_do` on a step with `on_cannot_do: escalate` (every time)
+- `escalate_step:<step_id>`: a `type: escalate` step is entered (every time, including the start step)
+- `warning_sign:<step_id>`: `condition_changed` on a step whose `on_condition_changed` is `escalate` (every time)
 - `unresolved_after_step`: the `escalate_if_unresolved_after` step is left and the session is not resolved (once)
 - `stale_vitals`: freshness_term < 0.2 or no reading (once)
 - `low_classification_confidence`: best `/classify` candidate < `min_classification_confidence` (0.5, `team_derived`) (once)
@@ -434,15 +477,17 @@ time, session id) — no medical text.
   runs, with LLM nodes swapped for rule/template nodes.
 - Retrieval: local `sentence-transformers` + FAISS (or Chroma) over protocol steps and NASA public reference
   chunks. Each chunk has an `id` and a `source`.
-- `/agent/ask` with `session_id` (sos-v0): the context is the **current step** (id, text, source) + latest vitals
-  values only. No LLM call if the step is the placeholder or has no real source, or the checklist is finished →
-  "The checklist doesn't cover this — contact ground." The answer is accepted only if it cites exactly the current
-  step id and every number in it appears in the context; otherwise the same fixed reply. Offline / no LLM →
+- `/agent/ask` with `session_id` (sos-v0): the context is the **current step** (id, text, `ref`, source titles) +
+  latest vitals values only; the reviewer `note` is not sent. No LLM call if the step is the placeholder or has no
+  source, or the checklist is finished → "The checklist doesn't cover this — contact ground." The answer is
+  accepted only if it cites exactly the current step id, every number in it appears in the context, it repeats
+  no word the question introduced that the step does not use (e.g. a drug name), and it contains no dose word
+  (mg, tablet, dose, …) absent from the step; otherwise the same fixed reply. Offline / no LLM →
   "Not covered offline — follow the checklist". Without `session_id`: knowledge-base chunks only, with citations
   (retrieval not built yet → fixed "not covered" reply, no LLM call). Unknown `session_id` → 404. Each ask is logged
   as an `ask` event (question, `answered_by`, citations).
-  Response: `{answer, citations: [{kind: "checklist_step" | "kb_chunk", id}], session_id, answered_by: "llm" |
-  "fixed_reply", mode, disclaimer}`.
+  Response: `{answer, citations: [{kind: "checklist_step" | "kb_chunk", id, ref, sources: [{key, title, url,
+  medical}]}], session_id, answered_by: "llm" | "fixed_reply", mode, disclaimer}`.
 - `/sos/{id}/classify` response: `{session_id, candidates, source: "llm" | "picker_fallback",
   requires_confirmation: true, mode, low_confidence}`. `llm`: exactly 3 candidates
   `[{"symptom", "confidence": 0.0–1.0}]`, best first, restricted to problem types that have a checklist (invented
