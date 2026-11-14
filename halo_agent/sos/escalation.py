@@ -7,7 +7,7 @@ unknown keys are refused.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
@@ -23,11 +23,17 @@ class EscalationConfigError(ValueError):
     pass
 
 
+LEVELS = ("urgent", "report")
+
+
 @dataclass(frozen=True)
 class EscalationConfig:
     rules: dict
     stale_freshness_below: float
     min_classification_confidence: float
+    same_reason_cooldown_s: Optional[float] = None    # None = not set yet ([N — TBD]): every repeat is sent
+    rule_levels: dict = field(default_factory=dict)  # rule -> urgent | report
+    step_levels: dict = field(default_factory=dict)  # "<protocol_id>.<step_id>" -> urgent | report
 
     def enabled(self, rule: str) -> bool:
         return bool(self.rules.get(rule, False))
@@ -43,7 +49,8 @@ def parse_config(data: dict, path: str = "<dict>") -> EscalationConfig:
         raise EscalationConfigError(f"{path}: unknown rules {sorted(unknown)}, missing rules {sorted(missing)}")
     if not all(isinstance(v, bool) for v in rules.values()):
         raise EscalationConfigError(f"{path}: rule values must be true/false")
-    extra = set(data) - {"rules", "stale_freshness_below", "min_classification_confidence"}
+    extra = set(data) - {"rules", "stale_freshness_below", "min_classification_confidence",
+                         "same_reason_cooldown_s", "rule_levels", "step_levels"}
     if extra:
         raise EscalationConfigError(f"{path}: unknown keys {sorted(extra)}")
     try:
@@ -53,7 +60,20 @@ def parse_config(data: dict, path: str = "<dict>") -> EscalationConfig:
         raise EscalationConfigError(f"{path}: stale_freshness_below and min_classification_confidence are required numbers")
     if not (0 <= stale <= 1 and 0 <= conf <= 1):
         raise EscalationConfigError(f"{path}: thresholds must be within 0..1")
-    return EscalationConfig(dict(rules), stale, conf)
+    cool = data.get("same_reason_cooldown_s")
+    if cool is not None and (isinstance(cool, bool) or not isinstance(cool, (int, float)) or cool < 0):
+        raise EscalationConfigError(f"{path}: same_reason_cooldown_s must be null or a number >= 0")
+    rule_levels = data.get("rule_levels") or {}
+    step_levels = data.get("step_levels") or {}
+    if not isinstance(rule_levels, dict) or not set(rule_levels) <= set(RULES):
+        raise EscalationConfigError(f"{path}: rule_levels keys must be rules {RULES}")
+    if not isinstance(step_levels, dict) or not all(isinstance(k, str) and "." in k for k in step_levels):
+        raise EscalationConfigError(f"{path}: step_levels keys must be '<protocol_id>.<step_id>'")
+    for v in list(rule_levels.values()) + list(step_levels.values()):
+        if v not in LEVELS:
+            raise EscalationConfigError(f"{path}: level must be one of {LEVELS}, got {v!r}")
+    return EscalationConfig(dict(rules), stale, conf, None if cool is None else float(cool),
+                            dict(rule_levels), dict(step_levels))
 
 
 def load_config(path: Path = CONFIG) -> EscalationConfig:

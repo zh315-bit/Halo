@@ -31,6 +31,7 @@ class AlertMessage:
     attempts: int = 0
     error: Optional[str] = None
     history: list[dict] = field(default_factory=list)
+    reasons: list[str] = field(default_factory=list)   # a combined message (opening alert) carries several
 
 
 @dataclass
@@ -58,5 +59,6 @@ def mask_number(num: Optional[str]) -> Optional[str]:
 
 
 def render_body(msg: AlertMessage) -> str:
+    reasons = ", ".join(msg.reasons or [msg.reason])
     return (f"HALO SOS {msg.session_id}: crew {msg.crew_id}, problem {msg.symptom}, "
-            f"reason {msg.reason}, at {msg.created_at}. Open the HALO console to acknowledge.")
+            f"reason {reasons}, at {msg.created_at}. Open the HALO console to acknowledge.")

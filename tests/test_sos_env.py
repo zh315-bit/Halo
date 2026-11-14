@@ -144,10 +144,8 @@ def test_admin_mode_switches_mission_env(client, tmp_path, monkeypatch):
     from halo_agent.api import routes_admin, routes_sos
     from halo_agent.sos import service as service_mod
     from halo_agent.sos.session_log import SessionLog
-    from halo_agent.sos.vitals import CsvReplayVitals, load_rows
-    rows = load_rows()
     routes_sos.set_service(service_mod.SosService(
-        vitals=CsvReplayVitals(rows, clock=lambda: rows[-1]["ts"]), score_fn=lambda c: None,
+        reading_fn=lambda c: None, score_fn=lambda c: None,
         log=SessionLog(tmp_path), mode_fn=routes_admin.current_mode, env_fn=routes_admin.current_mission_env))
     try:
         r = client.post("/api/v1/admin/mode", json={}).status_code

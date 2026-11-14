@@ -257,8 +257,15 @@ The Phase 0 fields are unchanged; everything below `disclaimer` is a sos-v0 addi
 - `mode` ∈ `online | offline`. `alert.mode` ∈ `dry_run | live | offline_queue`.
 - `state` ∈ `REPORTED | ALERTING | GUIDING | RESOLVED | HANDED_OFF`. Acknowledgement is an overlay
   (`alert.acknowledged_at`), not a state.
-- `score` is `null` when `halo_agent.core.score_latest` is unavailable or returns `None`; the UI shows
-  "Score unavailable" and the flow continues.
+- `vitals_snapshot` comes from `halo_agent.core.latest_reading` and `score` from `score_latest` — the same live
+  Engine. `score.reading_id` always equals `vitals_snapshot.reading_id`; a score for any other reading is not
+  shown. `score` is `null` when unavailable, `None`, or not for the displayed reading; the UI shows "Score
+  unavailable" and the flow continues. No reading → every vital `missing`.
+- `alert.messages[]` carry `reasons[]` (the opening message combines `sos_reported`, any context reasons and an
+  escalate first step). `level=report` escalations are never messages: they appear in `alert.reports[]` and
+  `alert.report_ui_message = "Reported to flight surgeon"`; `escalation.state` / `sms_status` follow urgent
+  messages only. `GET /api/v1/sos/ground-reports` lists the ground report queue.
+- `step.adaptation` / `step.gravity_dependent` are not used by v2 (superseded by `env`); the UI hides them when null.
 - `vitals_snapshot.metrics.*.status` ∈ `ok | stale | missing`. `measured_at` is the metric's last **new**
   measurement (carry-forward excluded). Stale = older than 10 min (`team_derived`).
 - `events[]` are append-only: `seq, at, action, actor, state_from, state_to` plus action-specific keys.
@@ -400,7 +407,8 @@ steps:
   dangling target, `next` cannot be `escalate`, every check has `on_condition_changed`, no loop through
   non-applicable steps in any environment, every non-placeholder step cites a source, all five problem types present.
 - ⚑ JSC-48031 page numbers come from a public OCR copy; verify against the PDF before citing on stage.
-- ⚑ v2 has no `adaptation` / `gravity_dependent` values yet; the fields are supported and passed through.
+- `adaptation` / `gravity_dependent` are not filled: v2 expresses this with `env`. The fields stay optional.
+- Optional `level: urgent | report` on escalate steps (default urgent). `fainting_v2.f7` is `report`.
 
 ### 8.2 Session flow and state machine
 `REPORTED → ALERTING → GUIDING → RESOLVED | HANDED_OFF`. The legal moves are one table
@@ -410,11 +418,13 @@ steps:
    crewmate picks one → `/confirm`. A different type switches the checklist to its first step and logs
    `checklist_switched` (`from_protocol`, `to_protocol`, `from_step`); `steps_done` keeps the history. The same type
    logs `symptom_confirmed`. `symptom_source` = `llm` if the choice was one of the LLM candidates, else `picker`.
-2. **Alert + guide together:** the same request sends the `sos_reported` alert and returns step 1. Network sends
-   run as background tasks, so guidance never waits for delivery.
-3. **Display:** latest vitals from the CSV replay (`sos/vitals.py`, until M1 has a latest-reading interface):
-   per-metric value, last new measurement time, age, `ok | stale | missing`, plus `display_label`.
-   Score only via `from halo_agent.core import score_latest`; `None` → `score: null`.
+2. **Alert + guide together:** the same request resolves step 1 and sends **one** opening message whose
+   `reasons` contain `sos_reported`, any context reasons and `escalate_step:<first step>`. Network sends run as
+   background tasks, so guidance never waits for delivery.
+3. **Display:** `from halo_agent.core import latest_reading` (the Engine's last processed reading, with per-vital
+   `measured_at` / `metric_age_seconds`); the SOS has no clock or CSV replay of its own. Per vital: value, last
+   new measurement, age, `ok | stale | missing` (unknown age is never `ok`), plus `display_label`. Score via
+   `score_latest`, kept only if its `reading_id` matches (one retry on a race, else `score: null`).
 4. **Guide:** one step at a time, in the session's `mission_env`. `done` / `skip` → `next`; `cannot_do` →
    `on_cannot_do`; `condition_changed` → re-read vitals + score, go to `on_condition_changed` or stay. Every
    target is env-resolved (§8.1); the step event records `skipped_to` when steps were skipped.
@@ -434,6 +444,14 @@ steps:
 - `stale_vitals`: freshness_term < 0.2 or no reading (once)
 - `low_classification_confidence`: best `/classify` candidate < `min_classification_confidence` (0.5, `team_derived`) (once)
 
+Policy (also in `escalation.yaml`):
+- **Same-reason cooldown:** a reason already sent is not re-sent within `same_reason_cooldown_s`; the repeat is
+  logged as `escalate_suppressed`. Value **[N — TBD]** (`null` = not set: every repeat is sent).
+- **Level** `urgent | report`: urgent = SMS (or queue/dry run). report = session log + ground report queue
+  (`data/sos_sessions/ground_reports.jsonl`, `GET /api/v1/sos/ground-reports`), no SMS, UI "Reported to flight
+  surgeon". Resolution: `step_levels["<protocol_id>.<step_id>"]` > checklist step `level` > `rule_levels[rule]` >
+  urgent.
+
 ### 8.4 M7 interface
 `AlertSender.send(AlertMessage) -> SendResult` (`halo_agent/notify/`). Recipients come only from env
 (`MISSION_SUPPORT_NUMBER`), never from a request. Message bodies are a fixed template (crew, problem type, reason,
@@ -447,6 +465,28 @@ time, session id) — no medical text.
   `failed`, UI "Alert not delivered. Continue the checklist.", checklist continues. Trial accounts can only text
   verified numbers.
 - **Phase 3:** voice call (TwiML), `ACK <session>` SMS replies with signature check, status callbacks.
+
+### 8.5 Proactive nudge (`sos/nudge.py`, `config/nudges.yaml`)
+Suggests checking on a crewmate when their score turns `alert`. Deterministic, offline, no LLM, **no new medical
+content**: suggestions are derived from the checklists' `red_flags`.
+- **Trigger:** the crew's latest `ScoreResult` transitions into `alert` (first alert seen, or non-alert → alert),
+  evaluated when `GET /api/v1/crew/{crew_id}/nudges` is polled.
+- **Red-flag alert** (a reason with a red-flag `rule_id` and status `alert`): checklists whose `red_flags` contain it,
+  ordered by `priority` (`spo2_low: [breathing_difficulty, chest_pain]`, `bp_crisis: [chest_pain]`; other matches
+  follow in file order), at most `max_suggestions` (2), then `other`. Text: "Check on your crewmate. Red flag: …".
+  `priority` can only order existing links: listing a checklist that lacks the red flag fails at load.
+- **z-band alert, no red flag:** `other` only, text "Check on your crewmate".
+- **Suppression** (each logged to `data/sos_sessions/nudges.jsonl` as `nudge_suppressed` with `why`): an SOS
+  session is open for that crew, the crew is snoozed, less than `min_interval_s` (300, `team_derived`) since the
+  last nudge, or a nudge is still active.
+- **Nudge:** `{nudge_id, crew_id, created_at, state: active|snoozed|dismissed|accepted, text, trigger: {reading_id,
+  as_of, status, severity, kind: red_flag|z_band, red_flags, reasons}, suggestions: [{symptom, protocol_id, title,
+  review_label, because}], snoozed_until, session_id, disclaimer}`.
+- **Endpoints:** `GET /api/v1/crew/{crew_id}/nudges` (active nudges), `POST /api/v1/nudges/{id}/snooze`
+  (`minutes` ∈ `snooze_minutes` [5, 15, 30]; also holds back new nudges for that crew until it ends; the snoozed
+  nudge comes back active afterwards), `POST /api/v1/nudges/{id}/dismiss`, `POST /api/v1/nudges/{id}/accept`
+  (`symptom` must be one of the suggestions; starts an SOS session for that crew — mission support is alerted —
+  and returns `{nudge, session}`). Unknown nudge → 404, already dismissed/accepted → 409, bad input → 422.
 
 ## 9. M5 — Daily report
 

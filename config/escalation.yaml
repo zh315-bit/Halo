@@ -15,3 +15,14 @@ rules:
 
 stale_freshness_below: 0.2              # §8.3; freshness_term = 1 up to 30 min, linear to 0 at 6 h (§7.5)
 min_classification_confidence: 0.5      # team_derived
+
+# Do not re-send the SAME reason (e.g. escalate_step:c_cpr) within this many seconds; suppressed repeats are
+# still logged (event escalate_suppressed). [N — TBD]: null = not set yet, every repeat is sent.
+same_reason_cooldown_s: null
+
+# Escalation level: urgent = SMS to mission support (default); report = session log + ground report queue only,
+# no SMS, UI shows "Reported to flight surgeon".
+rule_levels: {}          # rule -> level, e.g. {stale_vitals: report}
+# Per checklist step ("<protocol_id>.<step_id>"); overrides the checklist step's own `level`.
+# fainting_v2.f7 is already `level: report` in config/checklists/fainting.yaml.
+step_levels: {}

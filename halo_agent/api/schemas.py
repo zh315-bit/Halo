@@ -149,6 +149,7 @@ class SosStep(_Strict):
     adaptation: Optional[str] = None
     gravity_dependent: Optional[bool] = None
     on_condition_changed_means: Optional[Literal["warning_sign"]] = None   # check steps: button = "warning sign"
+    level: Optional[Literal["urgent", "report"]] = None   # escalate steps only
 
 
 class SourceOut(_Strict):                                               # sos-v2 addition
@@ -180,6 +181,7 @@ class VitalsSnapshot(_Strict):
 class ScoreBrief(_Strict):
     status: Status
     severity: int = Field(ge=0, le=3)
+    reading_id: Optional[str] = None    # sos-v2: always equals vitals_snapshot.reading_id (same Engine reading)
 
 
 class Escalation(_Strict):
@@ -193,6 +195,8 @@ class Escalation(_Strict):
 class AlertMessageOut(_Strict):                                         # sos-v0 addition
     message_id: str
     reason: str
+    reasons: list[str] = Field(default_factory=list)    # sos-v2: the opening message combines several
+    level: Literal["urgent"] = "urgent"                 # sos-v2: report-level escalations are never messages
     channel: str
     state: DeliveryState
     sender: Optional[Literal["dry_run", "queue", "twilio"]]
@@ -211,6 +215,20 @@ class SosAlert(_Strict):                                                # sos-v0
     ack_by: Optional[str]
     ui_message: Optional[str]
     messages: list[AlertMessageOut]
+    reports: list["GroundReport"] = Field(default_factory=list)   # sos-v2: level=report, no SMS
+    report_ui_message: Optional[Literal["Reported to flight surgeon"]] = None
+
+
+class GroundReport(_Strict):                                            # sos-v2 addition
+    report_id: str
+    session_id: str
+    crew_id: str
+    symptom: str
+    protocol_id: str
+    reason: str
+    step_id: Optional[str]
+    at: str
+    text: Literal["Reported to flight surgeon"]
 
 
 class StepDone(_Strict):                                                # sos-v0 addition
@@ -278,6 +296,56 @@ class ProblemType(_Strict):                                             # sos-v0
     review_status: ReviewStatus
     review_label: str
     steps: int
+
+
+# ---------- §8.5 Nudge (sos-v2 addition) ----------
+class NudgeSuggestion(_Strict):
+    symptom: str
+    protocol_id: str
+    title: str
+    review_label: str
+    because: list[str]                 # red flag rule_ids that link this checklist (empty for `other`)
+
+
+class NudgeTrigger(_Strict):
+    reading_id: Optional[str]
+    as_of: Optional[str]
+    status: Literal["alert"]
+    severity: Optional[int]
+    kind: Literal["red_flag", "z_band"]
+    red_flags: list[str]
+    reasons: list[str]                 # ScoreResult reason texts with status alert (engine wording)
+
+
+class Nudge(_Strict):
+    nudge_id: str
+    crew_id: str
+    created_at: str
+    state: Literal["active", "snoozed", "dismissed", "accepted"]
+    text: str
+    trigger: NudgeTrigger
+    suggestions: list[NudgeSuggestion]
+    snoozed_until: Optional[str]
+    session_id: Optional[str]
+    disclaimer: Literal["Decision support only. Not a diagnosis."]
+
+
+class NudgeList(_Strict):
+    crew_id: str
+    nudges: list[Nudge]
+
+
+class NudgeSnoozeRequest(_Request):
+    minutes: int
+
+
+class NudgeAcceptRequest(_Request):
+    symptom: str
+
+
+class NudgeAccepted(_Strict):
+    nudge: Nudge
+    session: SosSession
 
 
 # ---------- /classify and /agent/ask (not in §6; shapes from §10) ----------
@@ -384,3 +452,4 @@ class ModeResponse(_Strict):
 
 
 SosStep.model_rebuild()
+SosAlert.model_rebuild()
