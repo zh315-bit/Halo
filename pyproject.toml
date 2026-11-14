@@ -12,6 +12,7 @@ dependencies = [
 
 [project.optional-dependencies]
 shell = []  # Phase 2: langgraph, sentence-transformers, faiss-cpu, LLM SDK (provider TBD)
+alert = ["twilio>=9"]  # sos-v0: live SMS only (ALERT_MODE=live); dry_run/offline need nothing
 
 [dependency-groups]
 dev = ["pytest>=8", "httpx>=0.27"]

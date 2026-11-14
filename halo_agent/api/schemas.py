@@ -103,21 +103,38 @@ class ScoreRequest(_Strict):
 
 
 # ---------- 6.4 SosSession ----------
-StepOption = Literal["done", "cannot_do", "condition_changed"]
+# `skip` added in sos-v0 (team decision D). Existing values unchanged.
+StepOption = Literal["done", "cannot_do", "condition_changed", "skip"]
+SosState = Literal["REPORTED", "ALERTING", "GUIDING", "RESOLVED", "HANDED_OFF"]
+DeliveryState = Literal["not_needed", "sending", "sent", "acknowledged", "queued_offline", "failed"]
 
 
 class SosStep(_Strict):
     index: int
     total: int
-    id: str
+    id: str                     # step id, or "END" once the checklist is complete (options then empty)
     text: str
     source_ref: Optional[str]
     options: list[StepOption]
+    type: Optional[Literal["action", "observe", "confirm"]] = None      # sos-v0 addition
+
+
+class VitalMetric(_Strict):                                             # sos-v0 addition
+    value: Optional[float]
+    measured_at: Optional[str]      # last NEW measurement of this metric (carry-forward excluded)
+    age_seconds: Optional[float]
+    status: Literal["ok", "stale", "missing"]
 
 
 class VitalsSnapshot(_Strict):
     reading_id: Optional[str]
     age_seconds: Optional[float]
+    # sos-v0 additions
+    timestamp: Optional[str] = None
+    display_label: Optional[str] = None
+    data_origin: Optional[str] = None
+    stale: Optional[bool] = None
+    metrics: dict[str, VitalMetric] = Field(default_factory=dict)
 
 
 class ScoreBrief(_Strict):
@@ -129,8 +146,38 @@ class Escalation(_Strict):
     triggered: bool
     reasons: list[str]
     channel: str
-    state: Literal["not_needed", "sending", "sent", "acknowledged", "queued_offline", "failed"]
+    state: DeliveryState
     acknowledged: bool
+
+
+class AlertMessageOut(_Strict):                                         # sos-v0 addition
+    message_id: str
+    reason: str
+    channel: str
+    state: DeliveryState
+    sender: Optional[Literal["dry_run", "queue", "twilio"]]
+    sid: Optional[str]
+    attempts: int
+    error: Optional[str]
+    created_at: str
+    body: str
+
+
+class SosAlert(_Strict):                                                # sos-v0 addition
+    mode: Literal["dry_run", "live", "offline_queue"]
+    sms_status: Literal["not_sent", "sending", "dry_run", "sent", "queued_offline", "failed"]
+    call_status: Literal["not_implemented"]          # voice call is Phase 3
+    acknowledged_at: Optional[str]
+    ack_by: Optional[str]
+    ui_message: Optional[str]
+    messages: list[AlertMessageOut]
+
+
+class StepDone(_Strict):                                                # sos-v0 addition
+    step_id: str
+    action: StepOption
+    at: str
+    actor: str
 
 
 class SosSession(_Strict):
@@ -141,20 +188,50 @@ class SosSession(_Strict):
     protocol_id: str
     step: SosStep
     vitals_snapshot: VitalsSnapshot
-    score: ScoreBrief
+    score: Optional[ScoreBrief]          # sos-v0: null when scoring is unavailable ("Score unavailable")
     escalation: Escalation
     mode: Mode
     disclaimer: Literal["Decision support only. Not a diagnosis."]
+    # sos-v0 additions (defaults keep the Phase 0 stub payload valid)
+    state: Optional[SosState] = None
+    review_status: Optional[Literal["demo_unreviewed", "reviewed"]] = None
+    checklist_title: Optional[str] = None
+    checklist_complete: bool = False
+    started_at: Optional[str] = None
+    ended_at: Optional[str] = None
+    note: Optional[str] = None
+    steps_done: list[StepDone] = Field(default_factory=list)
+    score_reasons: list[str] = Field(default_factory=list)
+    alert: Optional[SosAlert] = None
+    events: list[dict] = Field(default_factory=list)   # append-only log: seq, at, action, actor, state_from, state_to, …
 
 
 class SosStartRequest(_Strict):
     crew_id: str
     symptom: Optional[str] = None          # picker path
     free_text: Optional[str] = None        # speech/typed path -> /classify first
+    note: Optional[str] = None             # sos-v0 addition: optional crew note, stored verbatim
 
 
 class SosStepRequest(_Strict):
     action: StepOption
+    step_id: Optional[str] = None          # sos-v0 addition: if sent and != current step -> 409 (double tap)
+
+
+class SosAckRequest(_Strict):                                           # sos-v0 addition
+    by: str = Field(min_length=1, max_length=64)
+
+
+class SosResolveRequest(_Strict):                                       # sos-v0 addition
+    outcome: Literal["resolved", "handed_off"] = "resolved"
+
+
+class ProblemType(_Strict):                                             # sos-v0 addition
+    symptom: str
+    title: str
+    protocol_id: str
+    review_status: Literal["demo_unreviewed", "reviewed"]
+    steps: int
 
 
 # ---------- /classify and /agent/ask (not in §6; shapes from §10) ----------
