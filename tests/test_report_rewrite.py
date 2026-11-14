@@ -13,7 +13,7 @@ from halo_agent.config_loader import REPO_ROOT, load_scoring_config
 from halo_agent.core.csv_source import load_csv
 from halo_agent.shell import cache as llm_cache
 from halo_agent.shell.llm import FakeLLM
-from halo_agent.shell.rewrite import SYSTEM, payload, rejection, rewrite_report
+from halo_agent.shell.rewrite import SYSTEM, gaps_sentence, payload, rejection, rewrite_report
 
 DISCLAIMER = "Decision support only. Not a diagnosis."
 
@@ -46,8 +46,8 @@ def report(monkeypatch, tmp_path):
 
 def good(system, user):
     f = json.loads(user)
-    n = next(t["days"] for t in f["vitals_trend"])
-    return f"Your duty status today is {f['duty_status']}. Your heart rate and SpO2 have been moving over the last {n} days."
+    n = f["trends"][0]["over_days"]
+    return f"Your duty status today is {f['duty_status']}. Your heart rate has been rising over the last {n} days."
 
 
 def test_template_when_no_llm(report):
@@ -60,11 +60,12 @@ def test_valid_paragraph_replaces_summary(report):
     llm = FakeLLM(good)
     rep = report["get"](llm)
     assert rep["summary_generated_by"] == "llm"
-    assert rep["summary_text"] == "Your duty status today is rest. Your heart rate and SpO2 have been moving over " \
-                                  "the last 3 days. " + DISCLAIMER
+    fields, gaps = payload(report["template"])
+    assert rep["summary_text"] == ("Your duty status today is rest. Your heart rate has been rising over the last 3 days. "
+                                   + gaps_sentence(gaps) + " " + DISCLAIMER)
     sent = json.loads(llm.calls[0]["user"])
-    assert "summary_text" not in sent and "summary_generated_by" not in sent and "disclaimer" not in sent
-    assert sent["duty_status"] == "rest" and llm.calls[0]["system"] == SYSTEM
+    assert sent == fields and llm.calls[0]["system"] == SYSTEM
+    assert sent["duty_status"] == "rest"
     assert {k: v for k, v in rep.items() if k not in ("summary_text", "summary_generated_by")} == \
            {k: v for k, v in report["template"].items() if k not in ("summary_text", "summary_generated_by")}
 
@@ -79,12 +80,17 @@ def test_offline_makes_no_call(report):
 
 @pytest.mark.parametrize("reply,why", [
     ("Your duty status is rest. Your heart rate rose by 17 bpm.", "number_not_in_fields"),
+    ("Your duty status is rest. You spent 420.0 minutes in bed.", "decimal_on_whole_number"),
+    ("Your duty status is rest. Your heart rate rose over 3.", "unit_missing"),        # 3 is in the fields
+    ("Your duty status is rest. Your SpO2 fell over 3, below usual.", "unit_missing"),
+    ("Your duty_status is rest.", "field_name_copied"),
+    ("Your duty status is rest. " + "Very " * 80 + "long.", "too_long"),
     ("You are doing fine today.", "duty_status_missing"),
     ("Duty status: rest. Take aspirin with water.", "medicine_or_dose"),
     ("Duty status: rest.\n\nSecond paragraph.", "shape"),
 ])
 def test_rejected_paragraph_keeps_template(report, reply, why):
-    fields = payload(report["template"])
+    fields, _ = payload(report["template"])
     assert rejection(" ".join(reply.split()) if why != "shape" else reply, fields) == why
     rep = report["get"](FakeLLM(reply))
     assert rep["summary_generated_by"] == "template" and rep["summary_text"] == report["template"]["summary_text"]
@@ -116,3 +122,33 @@ def test_rewrite_report_direct_offline_no_call():
     rep = {"duty_status": "ready", "summary_text": "t", "summary_generated_by": "template", "disclaimer": DISCLAIMER}
     llm = FakeLLM(good)
     assert rewrite_report(rep, llm, "offline") == rep and llm.calls == []
+
+
+def test_payload_only_meaningful_fields(report):
+    fields, gaps = payload(report["template"])                  # synthetic drift crew, day 5
+    assert "scan_verdict" not in fields and "scan_tests" not in fields
+    assert "self_reported_hours" not in fields.get("sleep", {})
+    flat = json.dumps(fields)
+    assert "null" not in flat and "insufficient" not in flat
+    assert "morning activity" in gaps and any(g.startswith("trends (") for g in gaps)
+    assert gaps_sentence(gaps).startswith("Not enough data yet for: ")
+
+
+def test_payload_live_crew_drops_in_bed_fields():
+    rep = {"duty_status": "caution", "crew_source": "live",
+           "sleep": {"in_bed_minutes": None, "vs_baseline": None, "in_bed_hr_median": None, "source": "self_report",
+                     "self_report_hours": 8, "self_report_vs_baseline_hours": None},
+           "morning_activity": {"completion_seconds": None, "vs_baseline_pct": None, "source": "scan_tests",
+                                "tests": [{"metric": "docking_error_pct", "value": 2.8, "baseline_median": None,
+                                           "n_prior": 0, "vs_baseline_pct": None}]},
+           "scan_verdict": {"label": "Scan verdict", "verdict": "rest", "readiness_score": 76, "flags": [],
+                            "reading_id": "bf1cbc96-7418", "source": "scan_app", "note": "x"},
+           "vitals_trend": [{"metric": "heart_rate_bpm", "days": 3, "direction": "insufficient"}],
+           "environment_context": {"label": "x", "is_personal_dose": False, "dose_day_ugy": None},
+           "watch_items": [], "recommendations": [], "disclaimer": DISCLAIMER}
+    fields, gaps = payload(rep)
+    assert fields == {"duty_status": "caution", "sleep": {"self_reported_hours": 8},
+                      "scan_tests": [{"test": "docking error", "value": 2.8}],
+                      "scan_verdict": {"label": "Scan verdict", "verdict": "rest", "readiness_score": 76}}
+    assert gaps == ["sleep compared with your usual", "docking error compared with earlier scans",
+                    "trends (heart rate)"]

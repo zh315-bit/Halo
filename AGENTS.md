@@ -623,17 +623,23 @@ camera_scan`, fed by main's `POST /api/v1/scan`). Everything live is labelled **
 5. **Shell rewrite (online):** the LLM receives **only the structured fields** and writes one paragraph.
    Validate the result: every number in the text must appear in the fields. If validation fails, fall back
    to the template and set `summary_generated_by: "template"`.
-   **Built (2026-11-14), `shell/rewrite.py`, called by `GET …/daily-report` through `call_llm()`:**
-   - The model gets the report minus `summary_text`, `summary_generated_by`, `disclaimer` and `scan_verdict.reading_id`.
-   - Every other field is unchanged; only `summary_text` / `summary_generated_by` can change.
+   **Built (2026-11-14), `shell/rewrite.py` (`report-v2`), called by `GET …/daily-report` through `call_llm()`:**
+   - The model gets only the fields that mean something for this crew (`payload()`): live crews get
+     self-reported sleep, scan tests and the Scan verdict; synthetic crews get time in bed and the morning activity.
+   - Null, empty or `insufficient` fields are never sent. Code appends one sentence,
+     "Not enough data yet for: …", after the paragraph; the model never writes it.
+   - Prompt: ≤ 80 words; duty status first, then the 1–2 most important findings, then the recommendations;
+     every number with its unit; no field names or raw values ("same as usual"); no "420.0".
    - Checks (`rejection()`), all must pass:
-     - every number in the text appears in the fields;
+     - one paragraph of ≤ 80 words;
+     - every number appears in the fields sent, and no whole number is written as `N.0`;
+     - every number in a sentence about heart rate or SpO₂ has a unit;
      - the `duty_status` word appears;
-     - no medicine name or dose expression (`config/ask_guard.yaml`);
-     - one paragraph, ≤ 900 chars.
-   - The fixed disclaimer is appended by code.
+     - no snake_case field name is copied;
+     - no medicine name or dose expression (`config/ask_guard.yaml`).
+   - Only `summary_text` / `summary_generated_by` can change. The fixed disclaimer is appended by code.
    - Offline, no LLM, timeout, error or a failed check → template.
-   - The first answer per field set is cached (namespace `report`, `PROMPT_VERSION = report-v1`).
+   - The first answer per field set is cached (namespace `report`).
    - Test injection: `routes_report.set_llm(FakeLLM(...))`.
 6. Every number shown carries its source (`demo_playback`, face scan, NASA historical reference).
 
@@ -668,7 +674,7 @@ camera_scan`, fed by main's `POST /api/v1/scan`). Everything live is labelled **
   restart; `shell/cache.py`) and replayed: same question → same displayed result, `not_covered` flag included.
   `/agent/ask` key: `[PROMPT_VERSION, model, step id, step-text hash, normalized question (lowercase, collapsed
   spaces), reading_id]`; `/classify` key: `[PROMPT_VERSION, model, normalized text + problem types]`. **Bump
-  `PROMPT_VERSION`** (`ask-v2`, `classify-v1`, `report-v1`) whenever a system prompt or payload changes. Errors/timeouts are not
+  `PROMPT_VERSION`** (`ask-v2`, `classify-v1`, `report-v2`) whenever a system prompt or payload changes. Errors/timeouts are not
   cached; only clients with `cacheable = True` (the real `AnthropicLLM`) are. `DELETE /api/v1/admin/llm-cache` →
   `{cleared, file}` empties it. Live check (costs money, skipped by
   default): `HALO_LIVE_LLM=1 … pytest tests/test_sos_llm_live.py`. Offline / no LLM →

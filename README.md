@@ -191,9 +191,10 @@ the symptom picker, a fixed reply and the template text when offline.
 - Radiation prediction model: none exists, the UI shows "Model not trained".
 - Bone density in scoring (Phase 4), ML scoring model, face-scan vital-sign algorithms.
 - Daily report LLM rewrite is built (`shell/rewrite.py`): online, the model rewrites only `summary_text` from the
-  structured fields, and the paragraph is shown (`summary_generated_by: "llm"`) only if every number in it is in the
-  fields, the duty status is kept and no medicine or dose appears. Otherwise, and always offline, the template text
-  stays. It was tested with a scripted fake model only, not yet against the live API.
+  crew-relevant structured fields (≤ 80 words, units on every number), and code appends "Not enough data yet
+  for: …". The paragraph is shown (`summary_generated_by: "llm"`) only if every number is in the fields, heart
+  rate and SpO₂ numbers carry units, the duty status is kept and no medicine or dose appears; otherwise, and always
+  offline, the template text stays. Checked against Claude Opus 5.5 on the drift scenario (days 2 and 6 passed).
 
 ## AI tools used during development
 
