@@ -13,15 +13,17 @@ READING = {
 DISCLAIMER = "Decision support only. Not a diagnosis."
 
 
-def _ok(r, model):
+def _ok(r, model, stub=True):
     assert r.status_code == 200, r.text
-    assert r.headers.get("X-HALO-Stub") == "true"
+    assert (r.headers.get("X-HALO-Stub") == "true") == stub
     return model.model_validate(r.json())
 
 
 def test_score(client):
-    out = _ok(client.post("/api/v1/score", json={"readings": [READING]}), S.ScoreResult)
-    assert out.reading_id == "QR_DEMO_0001" and out.engine == "rules-v0"
+    # Phase 1: real engine. A single reading has no baseline -> everything insufficient, confidence 0.
+    out = _ok(client.post("/api/v1/score", json={"readings": [READING]}), S.ScoreResult, stub=False)
+    assert out.reading_id == "QR_DEMO_0001" and out.engine == "rules-v0" and out.data_origin == "demo_playback"
+    assert out.baseline_quality == "insufficient" and out.confidence == 0
     assert any(i.status == "insufficient" and i.value is None for i in out.indicators)  # missing stays missing
 
 

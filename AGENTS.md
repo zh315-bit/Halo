@@ -246,9 +246,19 @@ The team draft's fields are kept unchanged. `reading_id`, `indicators` and `reas
   - Temperature: rows where `new_reading.temp` is true.
   - HR: every row.
   - Carried-forward values are not re-scored; they only lower freshness.
-- If an activity group has fewer than 3 points, fall back to the metric's pooled baseline across activities
-  (`baseline_quality: partial`). If that still has fewer than 3 points, the indicator is `insufficient`
-  (matches Kavya's lab-data rule).
+- If an activity group has fewer than `min_points` points, fall back to the metric's pooled baseline across
+  activities (`baseline_quality: partial`). If that still has fewer than `min_points`, the indicator is
+  `insufficient` and no z band is applied (red flags still run). `min_points = 12` (`team_derived`, decided
+  2026-11-14): 3 points is not a baseline, and a very narrow σ must not produce cautions.
+- **Baseline phase vs. no look-ahead (decided 2026-11-14).** The QR demo is baseline phase from start to end,
+  so freezing "all baseline rows" would score each row against its own future. Instead, during the baseline
+  phase the baseline accumulates in reading order from readings strictly *before* the one being scored; at
+  the crew's first non-baseline reading it is frozen and never changes again. `ScoreRequest.baseline_until`
+  (or the CSV `scenario` column) marks the phase.
+- **A changed value is always a new measurement (decided 2026-11-14).** The new-reading flags are not
+  reliable on their own: SBP and resp change a few times in the demo with both flags false. A value is new
+  if its flag says so, **or** it differs from the previous row's value, **or** it is the first value seen.
+  This keeps `reasons[].value` equal to the value the indicator shows.
 - MAD floors (`team_derived`, measurement resolution): temp 0.1 °C (switch to 0.2 if too sensitive),
   SpO2 1 %, resp 1 /min, HR 1 bpm, BP 2 mmHg.
 

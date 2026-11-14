@@ -1,0 +1,28 @@
+# Absolute red flags (AGENTS.md §7.4). They override the personal baseline and set the indicator to alert.
+# Values were supplied by the team and are PROVISIONAL: verified stays false until the user confirms the source.
+# Do not add rules here without a source. A rule with no `source` is forced off by the engine.
+rules:
+  - rule_id: spo2_low
+    metric: spo2_pct
+    op: "<"
+    value: 90
+    source: guideline
+    source_note: "to verify"
+    verified: false
+    enabled: true
+  - rule_id: fever
+    metric: body_temp_c
+    op: ">="
+    value: 38.0
+    source: guideline
+    source_note: "to verify"
+    verified: false
+    enabled: true
+  - rule_id: bp_crisis
+    metric: systolic_bp_mmhg
+    op: ">="
+    value: 180
+    source: guideline
+    source_note: "AHA hypertensive crisis category (to verify)"
+    verified: false
+    enabled: true
