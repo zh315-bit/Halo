@@ -299,6 +299,9 @@ The Phase 0 fields are unchanged; everything below `disclaimer` is a sos-v0 addi
   `alert.report_ui_message = "Reported to flight surgeon"`; `escalation.state` / `sms_status` follow urgent
   messages only. `GET /api/v1/sos/ground-reports` lists the ground report queue.
 - `step.adaptation` / `step.gravity_dependent` are not used by v2 (superseded by `env`); the UI hides them when null.
+- Live crews (§8.6): `vitals_snapshot.data_origin = "camera_scan"`; a vital the camera cannot measure (SpO₂, SBP,
+  DBP, temperature) is `missing` with `metrics.*.note = "Not measured by camera scan"`. Additions: `scan_context`,
+  `live_data`, `other_data` (and the same two blocks on each ground report).
 - `vitals_snapshot.metrics.*.status` ∈ `ok | stale | missing`. `measured_at` is the metric's last **new**
   measurement (carry-forward excluded). Stale = older than 10 min (`team_derived`).
 - `events[]` are append-only: `seq, at, action, actor, state_from, state_to` plus action-specific keys.
@@ -557,7 +560,10 @@ content**: suggestions are derived from the checklists' `red_flags`.
   ordered by `priority` (`spo2_low: [breathing_difficulty, chest_pain]`, `bp_crisis: [chest_pain]`; other matches
   follow in file order), at most `max_suggestions` (2), then `other`. Text: "Check on your crewmate. Red flag: …".
   `priority` can only order existing links: listing a checklist that lacks the red flag fails at load.
-- **z-band alert, no red flag:** `other` only, text "Check on your crewmate".
+- **z-band alert, no red flag:** `other` only, text "Check on your crewmate" — and only if the alerting vitals'
+  baseline is at least `z_band_min_baseline_quality` (`ok`, `team_derived`): a missing indicator baseline counts as
+  `insufficient`, a pooled one as `partial`; otherwise suppressed (`why: z_band_baseline_<quality>`), so a new live
+  crew with no baseline yet gets no false alarm. Red flags nudge regardless of baseline. Same rule for every crew.
 - **Suppression** (each logged to `data/sos_sessions/nudges.jsonl` as `nudge_suppressed` with `why`): an SOS
   session is open for that crew, the crew is snoozed, less than `min_interval_s` (300, `team_derived`) since the
   last nudge, or a nudge is still active.
@@ -569,6 +575,26 @@ content**: suggestions are derived from the checklists' `red_flags`.
   nudge comes back active afterwards), `POST /api/v1/nudges/{id}/dismiss`, `POST /api/v1/nudges/{id}/accept`
   (`symptom` must be one of the suggestions; starts an SOS session for that crew — mission support is alerted —
   and returns `{nudge, session}`). Unknown nudge → 404, already dismissed/accepted → 409, bad input → 422.
+
+### 8.6 Live camera-scan crews (`sos/live.py`, experimental)
+The SOS works the same for the demo crew (`CREW_01`, replayed) and live crews (e.g. `LIVE_01`, `data_origin:
+camera_scan`, fed by main's `POST /api/v1/scan`). Everything live is labelled **"Live camera measurement
+(experimental)"**.
+- **Vitals:** still `latest_reading(crew_id)`. Camera-unmeasurable vitals (SpO₂, SBP, DBP, temp) → `missing` +
+  "Not measured by camera scan". An unreliable camera HR is just `missing`.
+- **`scan_context`** (session view): the crew's latest scan — `scan_id, scanned_at, age_seconds, heart_rate_bpm,
+  heart_quality, breathing_brpm, breathing_quality, reaction_median_ms, verdict, scan_grade, notes`, plus `label`
+  and `data_origin`. Source: `halo_agent.core.latest_scan(crew_id)` (the scan record as posted, field names as in
+  `tests/fixtures/scan_record_sample.json`), else a `scan_context` attribute on the reading, else `null`.
+  **Interface for main to provide:** `latest_scan(crew_id) -> dict | None`, and a reading whose `data_origin` or
+  `measurement_origin` is `camera_scan`.
+- **`live_data` / `other_data`** (session view, export JSON, every ground report): every reading the session showed
+  (`reading_id, timestamp, data_origin, measurement_origin, first_used_at`) split into live camera readings (+ the scan
+  summaries used) and replayed/simulated readings ("Replayed demo or simulated data (not a live measurement)").
+  The two are never merged; a block is `null` when empty.
+- **Smoke:** `uv run python scripts/smoke_sos.py` — `demo` (CREW_01) and `scan` (POST the fixture as `LIVE_01` →
+  SOS → `camera_scan`, missing + note, `scan_context`, `live_data`). `scan` is SKIPPED until `/api/v1/scan` exists.
+  Assumed request body: the scan record plus `crew_id` (`scan_body()` in the script).
 
 ## 9. M5 — Daily report
 
