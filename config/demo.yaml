@@ -1,0 +1,29 @@
+# Demo scenes for POST /api/v1/admin/demo/{scene} (GET /api/v1/admin/demo lists them). team_derived.
+# A scene stops any running replay, then (in this order):
+#   clear_synthetic: true  -> forget every synthetic crew (live camera crews and data/live_scans.jsonl are never touched)
+#   load: [csv, ...]       -> reset the crews in each data/ file and feed it into the live Engine at once
+#   replay: {file, speed}  -> start a background replay (reset = only that file's crews)
+#   mode: online|offline   -> same as POST /admin/mode
+#   mission_env: microgravity|partial_gravity|post_landing|config  (config = back to config/app.yaml)
+# There is no SOS-event scene yet: SIMULATED_sos_event.csv waits for the data owner's OK (AGENTS ⚑ Q4).
+scenes:
+  baseline:
+    description: "Replayed QR demo crew CREW_01 (2 mission days, demo playback), online."
+    load: [qr_scan_demo_clean.csv]
+    mode: online
+  drift:
+    description: "SIMULATED 7-day drift crew SIM_CREW_DRIFT, loaded at once: rising resting HR, falling SpO2."
+    load: [SIMULATED_drift_7d.csv]
+    mode: online
+  drift_live:
+    description: "Same SIMULATED drift, replayed at 3600x (one hour per second, about 3 min in all)."
+    replay: {file: SIMULATED_drift_7d.csv, speed: 3600}
+    mode: online
+  offline:
+    description: "Pull the network: offline mode, data unchanged (LLM features fall back, alerts queue)."
+    mode: offline
+  reset:
+    description: "Forget all synthetic crews, back online, mission environment from config. Live scans stay."
+    clear_synthetic: true
+    mode: online
+    mission_env: config

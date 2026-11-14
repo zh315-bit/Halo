@@ -27,7 +27,26 @@ HALO_WARMUP_CSV=qr_scan_demo_clean.csv ALERT_MODE=dry_run uv run uvicorn halo_ag
 | Crew SOS | `GET /api/v1/sos/problem-types`, `POST /api/v1/sos`, `POST /api/v1/sos/{id}/step`, `…/classify`, `…/confirm`, `…/ack`, `…/resolve`, `GET /api/v1/sos/{id}` |
 | Ask about the current checklist step | `POST /api/v1/agent/ask` |
 | Nudges ("check on your crewmate") | `GET /api/v1/crew/{crew_id}/nudges`, `POST /api/v1/nudges/{id}/snooze \| dismiss \| accept` |
-| Demo controls | `POST /api/v1/admin/mode`, `POST/GET/DELETE /api/v1/admin/replay`, `DELETE /api/v1/admin/live-scans` |
+| Demo controls | `POST /api/v1/admin/demo/{scene}` (list: `GET /api/v1/admin/demo`), `POST /api/v1/admin/mode`, `POST/GET/DELETE /api/v1/admin/replay`, `DELETE /api/v1/admin/live-scans` |
+
+## Demo scenes
+
+`POST /api/v1/admin/demo/{scene}` switches the demo in one call. Scenes live in `config/demo.yaml`:
+
+| Scene | Effect |
+|---|---|
+| `baseline` | loads the replayed QR demo crew `CREW_01` at once, online |
+| `drift` | loads the SIMULATED 7-day drift crew `SIM_CREW_DRIFT` at once (rising resting HR, falling SpO₂) |
+| `drift_live` | replays the same drift at 3600× (about 3 min), so the dashboard can watch it move |
+| `offline` | "pulls the network": offline mode, data unchanged |
+| `reset` | forgets every synthetic crew, back online, mission environment from config |
+
+How every scene behaves:
+- It stops a running replay first.
+- It resets only the crews it loads.
+- It never touches live camera crews or `data/live_scans.jsonl`.
+
+There is no SOS-event scene yet: its data is waiting for the data owner's OK.
 
 ## Camera scan ingest (scan page → HALO)
 

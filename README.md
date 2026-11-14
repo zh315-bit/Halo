@@ -18,6 +18,7 @@ uv run uvicorn halo_agent.api.app:app --port 8000
 - Demo feed until M1 exists: start the server with `HALO_WARMUP_CSV=qr_scan_demo_clean.csv`, or
   `POST /api/v1/admin/replay {"file": "SIMULATED_drift_7d.csv", "speed": 600}`.
 - Offline mode: `HALO_OFFLINE=1`, or `POST /api/v1/admin/mode {"mode": "offline"}`.
+- Demo scenes in one call: `POST /api/v1/admin/demo/{baseline|drift|drift_live|offline|reset}` (`config/demo.yaml`).
 - Real camera scans from the team's scan page: `POST /api/v1/scan {"crew_id": "LIVE_01", "record": {...}}`
   (crew_id optional, default `LIVE_01`), or upload the downloaded JSON to `POST /api/v1/scan/upload` (form field
   `file`). `GET /api/v1/crews` lists every crew with `source: synthetic | live` for the front-end switch. CORS allows

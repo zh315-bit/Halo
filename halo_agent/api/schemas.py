@@ -555,6 +555,27 @@ class ReplayRequest(_Request):
     reset: bool = True                          # clear the crews in this file first (other crews, e.g. live scans, stay)
 
 
+class DemoScene(_Strict):
+    scene: str
+    description: str
+
+
+class DemoLoaded(_Strict):
+    file: str
+    crews: list[str]
+    readings: int
+
+
+class DemoSceneResult(_Strict):
+    scene: str
+    description: str
+    cleared_crews: list[str]                    # synthetic crews forgotten (clear_synthetic)
+    loaded: list[DemoLoaded]                    # files fed into the Engine at once
+    replay: Optional["ReplayStatus"]            # background replay started by the scene, else null
+    mode: Mode
+    mission_env: Optional[MissionEnv] = None
+
+
 class ReplayStatus(_Strict):
     state: Literal["idle", "running", "done", "stopped", "error"]
     file: Optional[str]
@@ -603,3 +624,6 @@ class LiveScansCleared(_Strict):
 
 class CrewList(_Strict):
     crews: list[CrewInfo]
+
+
+DemoSceneResult.model_rebuild()
