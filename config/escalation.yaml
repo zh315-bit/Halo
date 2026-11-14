@@ -17,8 +17,9 @@ stale_freshness_below: 0.2              # §8.3; freshness_term = 1 up to 30 min
 min_classification_confidence: 0.5      # team_derived
 
 # Do not re-send the SAME reason (e.g. escalate_step:c_cpr) within this many seconds; suppressed repeats are
-# still logged (event escalate_suppressed). [N — TBD]: null = not set yet, every repeat is sent.
-same_reason_cooldown_s: null
+# still logged (event escalate_suppressed). team_derived (2026-11-14): 60 s, so a demo loop does not resend SMS.
+# null = off (every repeat is sent).
+same_reason_cooldown_s: 60
 
 # Escalation level: urgent = SMS to mission support (default); report = session log + ground report queue only,
 # no SMS, UI shows "Reported to flight surgeon".

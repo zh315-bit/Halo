@@ -103,8 +103,9 @@ def test_cannot_do_escalates_and_checklist_continues(env):
     s = step(c, s, "cannot_do").json()              # c1g cannot_do -> escalate, continue at c2
     assert s["step"]["id"] == "c2" and s["state"] == "GUIDING"
     assert [m["reasons"] for m in s["alert"]["messages"]] == [["sos_reported", "escalate_step:c0"], ["cannot_do"]]
-    s = step(c, s, "cannot_do").json()              # a second cannot_do sends a second message
-    assert [m["reason"] for m in s["alert"]["messages"]].count("cannot_do") == 2
+    s = step(c, s, "cannot_do").json()              # same reason within 60 s (team_derived): logged, not re-sent
+    assert [m["reason"] for m in s["alert"]["messages"]].count("cannot_do") == 1
+    assert s["events"][-1]["action"] == "escalate_suppressed" and s["step"]["id"] == "c3"   # checklist goes on
 
 
 def test_cannot_do_routes_to_step_without_cannot_do_reason(env):

@@ -19,6 +19,9 @@ app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], all
 # Process-wide live engine behind core.score_latest(); the reading feed (M1 / WS) calls core.get_engine().update().
 core.set_engine(core.Engine(load_scoring_config()))
 
+# sos-v2: create nudges as scores change (§8.5). After warm-up, so only live updates nudge.
+routes_sos.attach_nudges(core.get_engine())
+
 for r in (routes_score, routes_sos, routes_report, routes_admin):
     app.include_router(r.router)
 

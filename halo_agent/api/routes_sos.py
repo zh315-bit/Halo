@@ -9,7 +9,7 @@ from fastapi import APIRouter, BackgroundTasks, HTTPException
 
 from halo_agent.shell import ask, classify
 from halo_agent.shell.llm import LLMClient, get_llm as _env_llm
-from halo_agent.sos.nudge import NudgeService, NudgeStateError, UnknownNudge
+from halo_agent.sos.nudge import NudgeService, NudgeStateError, UnknownNudge, attach
 from halo_agent.sos.service import DISCLAIMER, SosService, UnknownSession
 from halo_agent.sos.state_machine import IllegalTransition
 
@@ -44,6 +44,16 @@ def get_nudges() -> NudgeService:
     if _nudges is None or _nudges.sos is not get_service():
         _nudges = NudgeService(get_service())
     return _nudges
+
+
+def on_engine_score(score) -> None:
+    """Engine.update hook: resolved per call, so swapping the SOS service (tests) keeps working."""
+    get_nudges().on_score(score)
+
+
+def attach_nudges(engine) -> bool:
+    """Call once after core.set_engine(...) (app startup). Nudges are then created as scores change."""
+    return attach(engine, on_engine_score)
 
 
 _llm: Optional[LLMClient] = None
@@ -159,8 +169,8 @@ def agent_ask(req: AskRequest) -> dict:
 # ---------- §8.5 proactive nudge ----------
 @router.get("/crew/{crew_id}/nudges", response_model=NudgeList)
 def crew_nudges(crew_id: str) -> dict:
-    """Poll this: evaluates the latest score and returns the active nudges (created on the transition to alert)."""
-    return {"crew_id": crew_id, "nudges": get_nudges().evaluate(crew_id)}
+    """Lists active nudges. They are created by the Engine.update hook and pushed through on_nudge, not here."""
+    return {"crew_id": crew_id, "nudges": get_nudges().list(crew_id)}
 
 
 @router.post("/nudges/{nudge_id}/snooze", response_model=Nudge)
