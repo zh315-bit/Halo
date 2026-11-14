@@ -13,39 +13,44 @@ READING = {
 DISCLAIMER = "Decision support only. Not a diagnosis."
 
 
-def _ok(r, model):
+def _ok(r, model, stub=True):
     assert r.status_code == 200, r.text
-    assert r.headers.get("X-HALO-Stub") == "true"
+    assert (r.headers.get("X-HALO-Stub") == "true") == stub
     return model.model_validate(r.json())
 
 
 def test_score(client):
-    out = _ok(client.post("/api/v1/score", json={"readings": [READING]}), S.ScoreResult)
-    assert out.reading_id == "QR_DEMO_0001" and out.engine == "rules-v0"
+    # Phase 1: real engine. A single reading has no baseline -> everything insufficient, confidence 0.
+    out = _ok(client.post("/api/v1/score", json={"readings": [READING]}), S.ScoreResult, stub=False)
+    assert out.reading_id == "QR_DEMO_0001" and out.engine == "rules-v0" and out.data_origin == "demo_playback"
+    assert out.baseline_quality == "insufficient" and out.confidence == 0
     assert any(i.status == "insufficient" and i.value is None for i in out.indicators)  # missing stays missing
 
 
-def test_score_rejects_unknown_field(client):
-    bad = dict(READING, surprise=1)
-    assert client.post("/api/v1/score", json={"readings": [bad]}).status_code == 422
+def test_score_ignores_unknown_request_fields(client):
+    # M1 may post a whole CSV row: extra columns are dropped on requests (responses stay extra="forbid").
+    row = dict(READING, scenario="baseline", step=0, bp_new_reading=True, data_context="composite_dataset_demo")
+    assert client.post("/api/v1/score", json={"readings": [row], "also": 1}).status_code == 200
 
 
-def test_sos_flow(client):
+def test_morning_activity(client):
+    r = client.post("/api/v1/activity/morning", json={"crew_id": "CREW_01", "completed_at": "2026-11-16T07:30:00Z"})
+    assert r.status_code == 202 and r.json() == {"accepted": True, "report_date": "2026-11-16"}
+    r = client.post("/api/v1/activity/morning", json={"crew_id": "CREW_01", "date": "2026-11-17", "x": 1})
+    assert r.json()["report_date"] == "2026-11-17"
+    assert client.post("/api/v1/activity/morning", json={"crew_id": "CREW_01", "date": "bad"}).status_code == 422
+
+
+def test_sos_is_real_now(client):
+    # sos-v0 replaced the Phase 0 SOS stub; its flows are tested in tests/test_sos_*.py. Only the contract here.
     s = _ok(client.post("/api/v1/sos", json={"crew_id": "CREW_01", "symptom": "breathing_difficulty"}),
-            S.SosSession)
-    assert s.step.index == 1 and s.disclaimer == DISCLAIMER and s.symptom_source == "picker"
-    for action, idx in [("done", 2), ("cannot_do", 2), ("condition_changed", 1)]:
-        n = _ok(client.post(f"/api/v1/sos/{s.session_id}/step", json={"action": action}), S.SosSession)
-        assert n.step.index == idx
+            S.SosSession, stub=False)
+    assert s.disclaimer == DISCLAIMER and s.symptom_source == "picker"
     assert client.post("/api/v1/sos", json={"crew_id": "CREW_01"}).status_code == 422
 
 
-def test_sos_free_text_needs_confirmation(client):
-    s = _ok(client.post("/api/v1/sos", json={"crew_id": "CREW_01", "free_text": "hard to breathe"}),
-            S.SosSession)
-    assert s.symptom_source == "llm"
-    c = _ok(client.post(f"/api/v1/sos/{s.session_id}/classify", json={"free_text": "hard to breathe"}),
-            S.ClassifyResponse)
+def test_classify_stub(client):
+    c = _ok(client.post("/api/v1/sos/sos_001/classify", json={"free_text": "hard to breathe"}), S.ClassifyResponse)
     assert len(c.candidates) == 3 and c.requires_confirmation
 
 

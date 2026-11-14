@@ -1,0 +1,62 @@
+# HALO scoring engine rules-v0 (AGENTS.md §7). Every number here is team_derived unless marked otherwise.
+engine: rules-v0
+
+mission_start: "2026-11-15T00:00:00Z"   # ⚑ demo CSV has no calendar date (AGENTS.md §5)
+baseline_scenarios: [baseline]          # CSV `scenario` values that count as the baseline phase
+
+baseline:
+  # team_derived: 3 points is not a baseline. < 12 in the activity group -> pooled fallback (partial);
+  # < 12 pooled -> insufficient (no z band is applied; red flags still run).
+  min_points: 12
+  mad_scale: 1.4826      # MAD -> SD for normal data (standard constant)
+  # MAD floors = measurement resolution (team_derived). temp: switch to 0.2 if too sensitive.
+  mad_floor:
+    heart_rate_bpm: 1.0
+    resp_rate_bpm: 1.0
+    systolic_bp_mmhg: 2.0
+    diastolic_bp_mmhg: 2.0
+    body_temp_c: 0.1
+    spo2_pct: 1.0
+
+z_bands:
+  caution: 2.0
+  alert: 3.0
+  alert_consecutive: 2   # debounce: alert needs this many consecutive new readings beyond the alert band
+
+# Which deviation direction counts. high | low | both
+unfavourable:
+  heart_rate_bpm: high
+  resp_rate_bpm: high
+  body_temp_c: high
+  spo2_pct: low
+  systolic_bp_mmhg: both
+  diastolic_bp_mmhg: both
+
+# Which new-measurement flags make a value "new" (AGENTS.md §7.1). always = every row.
+# The first value seen for a metric is always treated as new (there is nothing to carry forward from).
+new_measurement_flags:
+  heart_rate_bpm: always
+  resp_rate_bpm: [bp, temp]
+  systolic_bp_mmhg: [bp, temp]
+  diastolic_bp_mmhg: [bp, temp]
+  spo2_pct: [bp, temp]
+  body_temp_c: [temp]
+
+confidence:
+  baseline_full_n: 12        # baseline_term = mean(min(1, n / 12))
+  fresh_full_minutes: 30     # freshness 1.0 up to here ...
+  fresh_zero_minutes: 360    # ... falling linearly to 0 at 6 h
+
+data_origin:                 # measurement_origin -> data_origin. Unknown origins are rejected.
+  master_csv_playback_not_camera: demo_playback
+  camera: camera
+  SIMULATED: simulated
+
+metrics:                     # display only (reason text)
+  heart_rate_bpm: {label: heart rate, unit: bpm}
+  resp_rate_bpm: {label: respiratory rate, unit: /min}
+  systolic_bp_mmhg: {label: systolic BP, unit: mmHg}
+  diastolic_bp_mmhg: {label: diastolic BP, unit: mmHg}
+  body_temp_c: {label: body temperature, unit: °C}
+  spo2_pct: {label: SpO2, unit: "%"}
+  blink_rate_per_min: {label: blink rate, unit: /min}
