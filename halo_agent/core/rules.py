@@ -9,6 +9,7 @@ from typing import Optional
 from .baseline import POOLED
 from .config import ScoringConfig
 from .models import Baseline, Indicator, Reason, VitalsReading
+from .trend import compute_trend
 
 STATUS_RANK = {"insufficient": -1, "normal": 0, "caution": 1, "alert": 2}
 
@@ -59,7 +60,9 @@ def missing_eval(metric: str, cfg: ScoringConfig) -> MetricEval:
 
 
 def evaluate_new(reading: VitalsReading, metric: str, baseline: Optional[Baseline], quality: str,
-                 prev_alert_streak: int, cfg: ScoringConfig) -> MetricEval:
+                 prev_alert_streak: int, trend_points: list, cfg: ScoringConfig) -> MetricEval:
+    """trend_points: (ts, value) of this metric's new measurements in the trend window, same activity
+    group, oldest -> newest, ending with this reading."""
     v = reading.value(metric)
     assert v is not None
     disp = cfg.metric_display.get(metric, {"label": metric, "unit": ""})
@@ -88,6 +91,23 @@ def evaluate_new(reading: VitalsReading, metric: str, baseline: Optional[Baselin
                                   deviation_mad=round(z, 2), direction="high" if z > 0 else "low",
                                   status=status, source="baseline", rule_id="z_band", text=text))
 
+    trend, unfav = compute_trend(trend_points, v, baseline, metric, cfg)
+    if unfav:
+        # An unfavourable trend adds a caution even when the single reading is inside the band (§7.3).
+        if STATUS_RANK[status] < STATUS_RANK["caution"]:
+            status = "caution"
+        span = f"{cfg.trend_window:g} {cfg.trend_unit}"
+        group = "" if baseline.group == POOLED else baseline.group.replace("_", "-").capitalize() + " "
+        lead = f"{group}{label}" if group else label[0].upper() + label[1:]
+        text = (f"{lead} is {trend.direction} about {abs(trend.slope_per_day):g} {unit} per day "
+                f"over the last {span}.")
+        if trend.days_to_alert is not None:
+            text += f" At this pace it reaches the alert band in about {trend.days_to_alert:g} days."
+        reasons.append(Reason(metric=metric, value=v, baseline_median=baseline.median,
+                              deviation_mad=round(z, 2), direction="trend_up" if trend.slope_per_day > 0
+                              else "trend_down", status="caution", source="baseline", rule_id="trend",
+                              text=text))
+
     for rf in cfg.red_flags:
         if rf.metric == metric and rf.fires(v):
             status = "alert"             # red flags override the baseline (§7.4); no debounce
@@ -103,5 +123,5 @@ def evaluate_new(reading: VitalsReading, metric: str, baseline: Optional[Baselin
     return MetricEval(
         indicator=Indicator(metric=metric, value=v, status=status,
                             deviation_mad=round(z, 2) if z is not None else None,
-                            baseline=baseline, trend=None, fresh_minutes=0.0),
+                            baseline=baseline, trend=trend, fresh_minutes=0.0),
         reasons=reasons, quality=quality, alert_streak=streak)

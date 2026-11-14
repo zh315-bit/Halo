@@ -9,6 +9,9 @@ baseline:
   # < 12 pooled -> insufficient (no z band is applied; red flags still run).
   min_points: 12
   mad_scale: 1.4826      # MAD -> SD for normal data (standard constant)
+  # team_derived: metrics whose level depends strongly on activity never use the pooled fallback
+  # (active HR ~98 vs an in-bed-dominated pool ~60 gave false alerts). Too few points -> insufficient.
+  no_pool_metrics: [heart_rate_bpm]
   # MAD floors = measurement resolution (team_derived). temp: switch to 0.2 if too sensitive.
   mad_floor:
     heart_rate_bpm: 1.0
@@ -22,6 +25,18 @@ z_bands:
   caution: 2.0
   alert: 3.0
   alert_consecutive: 2   # debounce: alert needs this many consecutive new readings beyond the alert band
+
+trend:                   # AGENTS.md §7.3 (team_derived)
+  window: 3
+  unit: days             # days | hours | readings. Steps = calendar mission days / clock hours / single readings
+  min_steps: 3           # fewer steps in the window -> trend null
+  min_points_per_step: 6 # days/hours: a step (e.g. today so far) with fewer new readings is left out
+  slope_sigma_per_day: 0.5   # |slope| >= 0.5 × baseline sigma per day -> rising / falling
+  # Fit-quality gate (team_derived): a slope past the threshold counts as rising/falling only if
+  # |slope| / SE(slope) >= min_slope_t, each step weighted by its own n (median variance ≈ (1.2533σ)²/n).
+  # Chosen over R² >= 0.6 and "all steps same direction" on SIMULATED_drift_7d.csv; null = off.
+  min_slope_t: 2.3
+  days_to_alert_max: 14      # days_to_alert shown only when 0 < d <= 14
 
 # Which deviation direction counts. high | low | both
 unfavourable:

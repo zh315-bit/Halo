@@ -1,0 +1,456 @@
+# HALO Crew SOS checklists — v2 (DRAFT, sourced, NOT medically reviewed)
+#
+# What changed from v1
+#   - Spaceflight sources first: NASA Shuttle Medical Checklist (JSC-48031 Rev H, 2001) and the
+#     DGLRM/ESAM microgravity CPR guideline (2020). MedlinePlus is kept for general first-aid principles.
+#   - Every step has `env`: which environment it applies to. The state machine shows only the steps
+#     that match the mission's current environment and follows `next` for the rest.
+#       microgravity     – in orbit / transit (ISS, Gateway, Mars transit)
+#       partial_gravity  – lunar or Martian surface
+#       post_landing     – back in 1 g after flight
+#     A step with no `env` applies everywhere.
+#     Skipped steps are followed through their `next`, so environment variants are chained
+#     (e.g. c1 [microgravity] -> c1g [partial_gravity, post_landing] -> c2).
+#   - Restraint ("anchor yourself and the patient") comes first in microgravity.
+#   - "Call 911" is now "alert the Crew Medical Officer (CMO) and flight surgeon".
+#   - Gravity-dependent Earth steps (lie down, raise legs, roll on side) appear only outside microgravity.
+#
+# Field meanings
+#   type:     action   = do it, then press done
+#             check    = yes/no look; "condition_changed" means YES, a warning sign is present
+#             escalate = always fires escalation; the checklist continues at `next`
+#   next / on_cannot_do / on_condition_changed: step id, ESCALATE (escalate + continue to `next`), or END
+#   source:   one key or a list of keys from `sources`; `ref` = page/section where available
+#   note:     reviewer note (shown in a details panel, not as an instruction)
+#   [N — TBD]: numbers the sources don't give. Do not fill in without a source.
+#
+# Medication policy (team_policy): HALO never names a drug or dose. Where a NASA procedure includes a
+# medication step, HALO says to follow the onboard Medical Checklist as the flight surgeon directs.
+#
+# Page numbers for JSC-48031 come from a public OCR copy; verify against the PDF before citing on stage.
+
+sources:
+  nasa_medcl:
+    title: "NASA Medical Checklist, JSC-48031 Rev H (Space Shuttle, 2001)"
+    url: https://ibiblio.org/apollo/Shuttle/Medical%20Checklist/Medical%20Checklist%20Rev%20H.pdf
+    kind: spaceflight_procedure
+  dglrm_cpr:
+    title: "CPR during spaceflight – guideline for CPR in microgravity (DGLRM / ESAM-SMG, 2020)"
+    url: https://sjtrem.biomedcentral.com/articles/10.1186/s13049-020-00793-y
+    kind: spaceflight_guideline
+  nasa_oi:
+    title: "NASA HRP Evidence: Risk of Orthostatic Intolerance During Re-Exposure to Gravity"
+    url: https://ntrs.nasa.gov/api/citations/20150007319/downloads/20150007319.pdf
+    kind: spaceflight_evidence
+  ug_blood:
+    title: "Bloodstain pattern dynamics in microgravity (Kowalske et al.)"
+    url: https://eprints.staffs.ac.uk/8566/1/Bloodstain%20pattern%20dynamics%20in%20microgravity_%20Observations%20of%20a%20pilot%20study%20in%20the%20next%20frontier%20of%20forensic%20science.pdf
+    kind: spaceflight_research
+  mlp_heart_attack:
+    title: "Heart attack first aid — MedlinePlus"
+    url: https://medlineplus.gov/ency/article/000063.htm
+    kind: earth_first_aid
+  mlp_breathing:
+    title: "Breathing difficulties - first aid — MedlinePlus"
+    url: https://medlineplus.gov/ency/article/000007.htm
+    kind: earth_first_aid
+  mlp_fainting:
+    title: "Fainting — MedlinePlus"
+    url: https://medlineplus.gov/ency/article/003092.htm
+    kind: earth_first_aid
+  mlp_bleeding:
+    title: "Bleeding — MedlinePlus"
+    url: https://medlineplus.gov/ency/article/000045.htm
+    kind: earth_first_aid
+  team_policy:
+    title: "HALO team policy (not a medical source)"
+    url: null
+    kind: team_policy
+
+protocols:
+
+  # =================================================================== CHEST PAIN
+  - protocol_id: chest_pain_v2
+    symptom: chest_pain
+    title: "Chest pain or pressure"
+    review_status: sourced_unreviewed
+    show_vitals: [heart_rate_bpm, systolic_bp_mmhg, diastolic_bp_mmhg, spo2_pct, resp_rate_bpm]
+    red_flags: [bp_crisis, spo2_low]
+    start: c0
+    steps:
+      c0:
+        type: escalate
+        text: "Alert the CMO and the flight surgeon now. Don't wait to see if the pain goes away."
+        source: [nasa_medcl, mlp_heart_attack]
+        ref: "JSC-48031 p.1-36 (contact Surgeon)"
+        next: c1
+      c1:
+        type: action
+        env: [microgravity]
+        text: "Anchor yourself and your crewmate with the restraint belts or handholds before you start."
+        source: nasa_medcl
+        ref: "JSC-48031 p.1-6 (Patient Restraint)"
+        next: c1g
+      c1g:
+        type: action
+        env: [partial_gravity, post_landing]
+        text: "Have them sit down and rest."
+        source: mlp_heart_attack
+        next: c2
+      c2:
+        type: check
+        text: "Do they have a pulse and are they breathing? Press 'condition changed' if NOT."
+        source: nasa_medcl
+        ref: "JSC-48031 p.1-36"
+        next: c3
+        on_condition_changed: c_cpr
+      c3:
+        type: action
+        text: "Have them stop all activity and stay as calm as possible. Loosen tight clothing."
+        source: mlp_heart_attack
+        next: c4
+      c4:
+        type: action
+        text: "Give oxygen with the mask. Don't use forced (triggered) oxygen on someone who is breathing."
+        source: nasa_medcl
+        ref: "JSC-48031 p.1-36 (provide O2), p.1-11 (oxygen)"
+        next: c5
+      c5:
+        type: action
+        text: "Attach the ECG / vitals monitor and record their vitals."
+        source: nasa_medcl
+        ref: "JSC-48031 p.1-36, p.1-8 (Cardiac Monitoring)"
+        note: "HALO shows the latest vitals here; this step is the physical hookup."
+        next: c6
+      c6:
+        type: action
+        text: "Medication: follow the onboard Medical Checklist as the flight surgeon directs. HALO does not suggest drugs."
+        source: [team_policy, nasa_medcl]
+        ref: "JSC-48031 p.1-36 includes a medication step"
+        next: c7
+      c7:
+        type: action
+        text: "Stay with them. Don't let them talk you out of getting help."
+        source: mlp_heart_attack
+        next: c8
+      c8:
+        type: action
+        text: "Recheck pulse and breathing and read the latest vitals every [N — TBD] minutes until the flight surgeon responds."
+        source: [nasa_medcl, mlp_heart_attack]
+        next: END
+        on_condition_changed: c2
+      c_cpr:
+        type: escalate
+        env: [microgravity]
+        text: "Start CPR. Until the patient is on the medical restraint system, use the Evetts-Russomano method; once restrained, use the handstand method."
+        source: [dglrm_cpr, nasa_medcl]
+        ref: "DGLRM/ESAM 2020 BLS/ALS recommendations; JSC-48031 p.1-6"
+        next: c_cpr_g
+      c_cpr_g:
+        type: escalate
+        env: [partial_gravity, post_landing]
+        text: "Start CPR following the onboard procedure. If an AED is available, follow its instructions."
+        source: [nasa_medcl, mlp_heart_attack]
+        note: "Partial gravity: research suggests manual compressions may be too shallow at lunar gravity. Not validated."
+        next: c8
+
+  # ========================================================== BREATHING DIFFICULTY
+  - protocol_id: breathing_difficulty_v2
+    symptom: breathing_difficulty
+    title: "Breathing difficulty"
+    review_status: sourced_unreviewed
+    show_vitals: [spo2_pct, resp_rate_bpm, heart_rate_bpm]
+    red_flags: [spo2_low]
+    start: b0
+    steps:
+      b0:
+        type: escalate
+        text: "Alert the CMO and the flight surgeon now. Don't wait to see if it improves."
+        source: [nasa_medcl, mlp_breathing]
+        ref: "JSC-48031 p.1-3"
+        next: b1
+      b1:
+        type: action
+        env: [microgravity]
+        text: "Anchor yourself and your crewmate with the restraint belts or handholds."
+        source: nasa_medcl
+        ref: "JSC-48031 p.1-6"
+        next: b2
+      b2:
+        type: check
+        text: "Can they speak or cough? Press 'condition changed' if they CANNOT breathe or speak."
+        source: nasa_medcl
+        ref: "JSC-48031 p.1-3 (Breathing Difficulty)"
+        next: b3
+        on_condition_changed: b_choke
+      b3:
+        type: check
+        text: "Did this start after dust, smoke or a chemical release? Press 'condition changed' if YES."
+        source: nasa_medcl
+        ref: "JSC-48031 p.1-3"
+        next: b4
+        on_condition_changed: b_expo
+      b4:
+        type: check
+        text: "Check airway, breathing and pulse. Press 'condition changed' if they are not breathing or have no pulse."
+        source: [nasa_medcl, mlp_breathing]
+        next: b5
+        on_condition_changed: b_cpr
+      b5:
+        type: action
+        text: "Give 100% oxygen with the mask until the flight surgeon says otherwise. Don't use forced oxygen on someone who is breathing."
+        source: nasa_medcl
+        ref: "JSC-48031 p.1-3, p.1-11"
+        next: b6
+      b6:
+        type: action
+        text: "Loosen any tight clothing."
+        source: mlp_breathing
+        next: b7
+      b7:
+        type: action
+        text: "Medication (e.g. an inhaler): follow the onboard Medical Checklist as the flight surgeon directs."
+        source: [team_policy, nasa_medcl]
+        ref: "JSC-48031 p.1-3 includes a medication step"
+        next: b8
+      b8:
+        type: check
+        text: "Is there an open wound on the chest or neck? Press 'condition changed' if YES."
+        source: [nasa_medcl, mlp_breathing]
+        ref: "JSC-48031 p.1-35 (Chest Injury)"
+        next: b9
+        on_condition_changed: b_wound
+      b9:
+        type: action
+        text: "Keep watching breathing, pulse and SpO2. Quieter wheezing does not necessarily mean they are improving."
+        source: mlp_breathing
+        next: END
+        on_condition_changed: b4
+      b_choke:
+        type: escalate
+        text: "Choking: brace yourself, then give abdominal thrusts. Repeat until the object comes out. If they become unconscious, press 'condition changed'."
+        source: nasa_medcl
+        ref: "JSC-48031 p.1-4 (Choking)"
+        next: b5
+        on_condition_changed: b_cpr
+      b_expo:
+        type: action
+        text: "Move them away from the exposure and protect the rest of the crew."
+        source: nasa_medcl
+        ref: "JSC-48031 p.1-3; section 7 (Toxicology)"
+        next: b4
+      b_wound:
+        type: action
+        text: "Cover the wound with an airtight dressing. Don't remove anything stuck in it."
+        source: nasa_medcl
+        ref: "JSC-48031 p.1-35"
+        note: "Conflict for review: NASA says airtight bandage; MedlinePlus says seal three sides and leave one open."
+        next: b9
+        on_cannot_do: ESCALATE
+      b_cpr:
+        type: escalate
+        text: "Start CPR. In microgravity: Evetts-Russomano method until the patient is restrained, then the handstand method. Otherwise follow the onboard procedure."
+        source: [dglrm_cpr, nasa_medcl]
+        ref: "JSC-48031 p.1-6"
+        next: b9
+
+  # =================================================== FAINTING / LOSS OF CONSCIOUSNESS
+  - protocol_id: fainting_v2
+    symptom: fainting
+    title: "Fainting or near-fainting"
+    review_status: sourced_unreviewed
+    scope_note: "Fainting from orthostatic intolerance mainly happens on re-exposure to gravity (landing, lunar/Mars surface)."
+    scope_source: nasa_oi
+    show_vitals: [heart_rate_bpm, systolic_bp_mmhg, diastolic_bp_mmhg, spo2_pct]
+    red_flags: [spo2_low]
+    start: f0
+    steps:
+      f0:
+        type: check
+        text: "Are they breathing and do they have a pulse? Press 'condition changed' if NOT."
+        source: [nasa_medcl, mlp_fainting]
+        next: f1
+        on_condition_changed: f_cpr
+      f1:
+        type: action
+        env: [microgravity]
+        text: "Anchor them so they don't drift into equipment, and keep their airway clear."
+        source: nasa_medcl
+        ref: "JSC-48031 p.1-6, p.1-39"
+        next: f1g
+      f1g:
+        type: action
+        env: [partial_gravity, post_landing]
+        text: "Lay them down and raise their feet about 30 cm (12 in) above heart level."
+        source: [mlp_fainting, nasa_oi]
+        next: f2
+      f2:
+        type: action
+        text: "Loosen tight clothing around the neck."
+        source: mlp_fainting
+        next: f3
+      f3:
+        type: action
+        env: [microgravity]
+        text: "If they vomit, clear the mouth with suction or into a sealed bag so nothing floats into the airway."
+        source: nasa_medcl
+        ref: "JSC-48031 p.1-39 (keep airway clear); vomitus into Ziploc bag"
+        next: f3g
+      f3g:
+        type: action
+        env: [partial_gravity, post_landing]
+        text: "If they vomit, turn them on their side so they don't choke."
+        source: mlp_fainting
+        next: f4
+      f4:
+        type: action
+        text: "Attach the vitals monitor and record their vitals."
+        source: nasa_medcl
+        ref: "JSC-48031 p.1-44 (Shock: check vitals)"
+        next: f5
+      f5:
+        type: check
+        text: "Escalate if ANY: not alert within a couple of minutes; chest pain; pounding or irregular heartbeat; can't speak, see clearly or move a limb; seizure; injured. Press 'condition changed' if YES."
+        source: mlp_fainting
+        next: f6
+        on_condition_changed: ESCALATE
+      f6:
+        type: action
+        env: [partial_gravity, post_landing]
+        text: "Keep them lying down 10–15 minutes, then help them get up slowly. Recheck vitals."
+        source: [mlp_fainting, nasa_oi]
+        next: f7
+      f7:
+        type: escalate
+        text: "Report the event to the flight surgeon, even if they recovered."
+        source: nasa_medcl
+        note: "Escalation type 'report' – non-urgent. Team to decide if this should be a lower priority than an emergency alert."
+        next: END
+      f_cpr:
+        type: escalate
+        text: "Alert the CMO and flight surgeon and start CPR. In microgravity: Evetts-Russomano method until the patient is restrained, then the handstand method."
+        source: [dglrm_cpr, nasa_medcl]
+        next: f5
+
+  # =================================================================== BLEEDING / INJURY
+  - protocol_id: bleeding_v2
+    symptom: bleeding_injury
+    title: "Injury with bleeding"
+    review_status: sourced_unreviewed
+    show_vitals: [heart_rate_bpm, systolic_bp_mmhg, diastolic_bp_mmhg]
+    red_flags: []
+    start: h0
+    steps:
+      h0:
+        type: action
+        env: [microgravity]
+        text: "Anchor yourself and your crewmate."
+        source: nasa_medcl
+        ref: "JSC-48031 p.1-6"
+        next: h1
+      h1:
+        type: action
+        text: "Put on gloves. Keep absorbent gauze ready and protect their eyes and face."
+        source: [nasa_medcl, ug_blood]
+        ref: "JSC-48031 p.4-30 (gloves); section 7 contaminant cleanup"
+        note: "In microgravity blood forms a dome over the wound; arterial bleeding can spray floating droplets."
+        next: h2
+      h2:
+        type: action
+        text: "Press directly on the wound with gauze."
+        source: [nasa_medcl, mlp_bleeding]
+        ref: "JSC-48031 p.4-30, p.1-27"
+        next: h3
+        on_cannot_do: ESCALATE
+      h3:
+        type: action
+        text: "Keep pressing until it stops. If blood soaks through, add more gauze on top. Don't remove the first layer."
+        source: mlp_bleeding
+        next: h4
+        on_cannot_do: h_tourniquet
+      h4:
+        type: action
+        text: "Don't remove anything stuck in the wound and don't probe it."
+        source: [nasa_medcl, mlp_bleeding]
+        ref: "JSC-48031 p.1-35"
+        next: h5
+      h5:
+        type: check
+        text: "Escalate if ANY: bleeding won't stop; wound on the abdomen, chest, neck, pelvis or groin; signs of shock (confusion, pale or clammy skin, fast pulse, dizziness, weakness, short of breath). Press 'condition changed' if YES."
+        source: [mlp_bleeding, nasa_medcl]
+        ref: "JSC-48031 p.1-44 (Shock)"
+        next: h6
+        on_condition_changed: h_severe
+      h6:
+        type: action
+        text: "Once bleeding is controlled: bandage it, photograph the wound, and contact the flight surgeon about closing it."
+        source: nasa_medcl
+        ref: "JSC-48031 p.4-30 to 4-31 (Lacerations, Major)"
+        next: h7
+      h7:
+        type: action
+        text: "Bag all used gauze and gloves, and recheck their vitals."
+        source: nasa_medcl
+        ref: "JSC-48031 section 7 (Contaminant Cleanup)"
+        next: END
+      h_severe:
+        type: escalate
+        text: "Alert the CMO and flight surgeon. Keep them still and warm, and check vitals. IV fluids only per the onboard Medical Checklist and flight surgeon."
+        source: [nasa_medcl, mlp_bleeding]
+        ref: "JSC-48031 p.1-44 (Shock: prevent heat loss, IV)"
+        next: h_severe_g
+      h_severe_g:
+        type: action
+        env: [partial_gravity, post_landing]
+        text: "If there's no head, neck, back or leg injury, lay them flat and raise their feet about 30 cm."
+        source: mlp_bleeding
+        next: h3
+      h_tourniquet:
+        type: escalate
+        text: "Only if pressure fails and bleeding is life-threatening: apply a tourniquet 5–7.5 cm (2–3 in) above the wound, not on a joint, and record the time."
+        source: mlp_bleeding
+        note: "Not found in JSC-48031 excerpts read so far; Earth source only."
+        next: h5
+
+  # =================================================================== OTHER (generic)
+  - protocol_id: other_v2
+    symptom: other
+    title: "Something else is wrong"
+    review_status: sourced_unreviewed
+    show_vitals: [heart_rate_bpm, spo2_pct, resp_rate_bpm, systolic_bp_mmhg, body_temp_c]
+    red_flags: [spo2_low, fever, bp_crisis]
+    start: o0
+    steps:
+      o0:
+        type: check
+        text: "Are they responsive and breathing normally? Press 'condition changed' if NOT."
+        source: [nasa_medcl, mlp_breathing]
+        next: o1
+        on_condition_changed: ESCALATE
+      o1:
+        type: action
+        env: [microgravity]
+        text: "Anchor yourself and your crewmate."
+        source: nasa_medcl
+        ref: "JSC-48031 p.1-6"
+        next: o2
+      o2:
+        type: action
+        text: "Have them stop activity and rest. Stay with them."
+        source: mlp_heart_attack
+        next: o3
+      o3:
+        type: action
+        text: "Give nothing by mouth until the flight surgeon says it's OK."
+        source: mlp_breathing
+        next: o4
+      o4:
+        type: action
+        text: "Note when symptoms started, attach the vitals monitor and record vitals."
+        source: [nasa_medcl, team_policy]
+        next: o5
+      o5:
+        type: escalate
+        text: "Contact the flight surgeon and describe what you see. If the symptoms match another checklist, switch to it."
+        source: [nasa_medcl, team_policy]
+        next: END

@@ -32,6 +32,8 @@ def select_baseline(pool: dict[str, list[float]], activity: str, metric: str,
     own = pool.get(activity, [])
     if len(own) >= cfg.min_points:
         return robust_baseline(own, activity, metric, cfg), "ok"
+    if metric in cfg.no_pool_metrics:
+        return None, "insufficient"
     pooled = [v for vs in pool.values() for v in vs]
     if len(pooled) >= cfg.min_points:
         return robust_baseline(pooled, POOLED, metric, cfg), "partial"
