@@ -569,11 +569,6 @@ class ReplayStatus(_Strict):
 
 
 # ---------- camera scan ingest (team scan page -> live crew) ----------
-class ScanIngestRequest(_Request):
-    crew_id: Optional[str] = None               # default: config/scan.yaml live_crew_id
-    record: dict                                # one scan record as the scan page downloads it (`scans` table)
-
-
 class ScanIngestResult(_Strict):
     accepted: Literal[True]
     duplicate: bool                             # same session_id already ingested for this crew: nothing re-scored
@@ -598,6 +593,12 @@ class CrewInfo(_Strict):
     latest_status: Optional[Status]
     display_label: Optional[str]
     baseline_building: Optional[BaselineBuilding] = None
+
+
+class LiveScansCleared(_Strict):
+    cleared_crews: list[str]
+    removed_records: int
+    file: str
 
 
 class CrewList(_Strict):

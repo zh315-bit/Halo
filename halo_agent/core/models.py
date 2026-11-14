@@ -34,6 +34,8 @@ class VitalsReading:
     in_baseline_phase: bool = True
     # Camera-scan extras kept verbatim (test scores, self-report, the scan page's own verdict). Never scored.
     scan_context: Optional[dict] = field(default=None, compare=False, hash=False)
+    # The scan page's record exactly as posted (core.latest_scan). Not part of the wire contract.
+    raw_scan: Optional[dict] = field(default=None, compare=False, hash=False, repr=False)
 
     def value(self, metric: str) -> Optional[float]:
         return getattr(self, metric)

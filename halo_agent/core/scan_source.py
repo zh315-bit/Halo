@@ -4,7 +4,7 @@ Stdlib only. Mapping (AGENTS.md §5):
   session_id                 -> reading_id
   created_at                 -> timestamp (must carry a timezone)
   heart_bpm                  -> heart_rate_bpm, only if heart_quality >= min_heart_quality (else missing)
-  breathing_brpm             -> resp_rate_bpm
+  breathing_brpm             -> resp_rate_bpm, only if breathing_quality >= min_breathing_quality (else missing)
   blink_rate_per_min         -> blink_rate_per_min (reported, never scored)
   SpO2, BP, body temperature -> missing: the camera does not measure them, never assumed normal
   test scores, self-report, the page's own verdict / readiness_score / flags -> scan_context (never scored)
@@ -13,6 +13,7 @@ Every value in a scan is a fresh measurement, so both new-reading flags are set.
 
 from __future__ import annotations
 
+import copy
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Optional
@@ -26,6 +27,7 @@ from .models import VitalsReading
 class ScanConfig:
     live_crew_id: str
     min_heart_quality: float
+    min_breathing_quality: float
     activity: str
     measurement_origin: str
     display_label: str
@@ -34,6 +36,7 @@ class ScanConfig:
     @classmethod
     def from_dict(cls, d: dict) -> "ScanConfig":
         return cls(live_crew_id=str(d["live_crew_id"]), min_heart_quality=float(d["min_heart_quality"]),
+                   min_breathing_quality=float(d["min_breathing_quality"]),
                    activity=str(d["activity"]), measurement_origin=str(d["measurement_origin"]),
                    display_label=str(d["display_label"]), context_fields=tuple(d["context_fields"]))
 
@@ -56,22 +59,28 @@ def reading_from_scan(record: dict, crew_id: Optional[str], cfg: ScanConfig,
     if not sid:
         raise ValueError("scan record needs session_id")
     ts = _ts(record.get("created_at"))
-    quality = _num(record.get("heart_quality"))
-    hr = _num(record.get("heart_bpm"))
     excluded = {}
-    if hr is not None and (quality is None or quality < cfg.min_heart_quality):
-        excluded["heart_rate_bpm"] = (f"heart_quality {quality:g} < {cfg.min_heart_quality:g}" if quality is not None
-                                      else "heart_quality missing")
-        hr = None
+
+    def gated(value_key: str, quality_key: str, minimum: float, metric: str) -> Optional[float]:
+        v, q = _num(record.get(value_key)), _num(record.get(quality_key))
+        if v is not None and (q is None or q < minimum):
+            excluded[metric] = f"{quality_key} {q:g} < {minimum:g}" if q is not None else f"{quality_key} missing"
+            return None
+        return v
+
+    quality = _num(record.get("heart_quality"))
+    hr = gated("heart_bpm", "heart_quality", cfg.min_heart_quality, "heart_rate_bpm")
+    resp = gated("breathing_brpm", "breathing_quality", cfg.min_breathing_quality, "resp_rate_bpm")
     context = {k: record.get(k) for k in cfg.context_fields}
     context.update(source="scan_app", scan_session_id=str(sid), app_version=record.get("app_version"),
-                   heart_quality=quality, excluded=excluded)
+                   heart_quality=quality, breathing_quality=_num(record.get("breathing_quality")),
+                   excluded=excluded)
     return VitalsReading(
         reading_id=str(sid), crew_id=crew_id or cfg.live_crew_id, timestamp=ts,
         mission_day=(ts.date() - scoring.mission_start.date()).days + 1, activity=cfg.activity,
-        heart_rate_bpm=hr, resp_rate_bpm=_num(record.get("breathing_brpm")),
+        heart_rate_bpm=hr, resp_rate_bpm=resp,
         systolic_bp_mmhg=None, diastolic_bp_mmhg=None, body_temp_c=None, spo2_pct=None,
         blink_rate_per_min=_num(record.get("blink_rate_per_min")),
         new_bp=True, new_temp=True,
         measurement_origin=cfg.measurement_origin, display_label=cfg.display_label,
-        in_baseline_phase=True, scan_context=context)
+        in_baseline_phase=True, scan_context=context, raw_scan=copy.deepcopy(record))

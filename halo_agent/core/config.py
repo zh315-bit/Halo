@@ -48,6 +48,8 @@ class ScoringConfig:
     unfavourable: dict
     new_flags: dict           # metric -> "always" | tuple of flag names
     baseline_full_n: float
+    baseline_full_n_by_origin: dict
+    measurable_metrics: dict      # data_origin -> tuple of vitals it can measure (default: all)
     fresh_full_minutes: float
     fresh_zero_minutes: float
     trend_window: float
@@ -64,6 +66,12 @@ class ScoringConfig:
     def min_points_for(self, data_origin: str) -> int:
         return self.min_points_by_origin.get(data_origin, self.min_points)
 
+    def measurable_for(self, data_origin: str) -> tuple:
+        return self.measurable_metrics.get(data_origin, VITAL_METRICS)
+
+    def baseline_full_n_for(self, data_origin: str) -> float:
+        return self.baseline_full_n_by_origin.get(data_origin, self.baseline_full_n)
+
     def is_live(self, data_origin: str) -> bool:
         return data_origin in self.live_data_origins
 
@@ -78,6 +86,9 @@ class ScoringConfig:
                     raise ValueError(f"scoring.yaml baseline.{section} missing {m}")
             if m not in scoring["unfavourable"] or m not in scoring["new_measurement_flags"]:
                 raise ValueError(f"scoring.yaml missing unfavourable/new_measurement_flags for {m}")
+        for origin, ms in (scoring.get("measurable_metrics") or {}).items():
+            if not ms or any(m not in VITAL_METRICS for m in ms):
+                raise ValueError(f"scoring.yaml measurable_metrics.{origin}: unknown or empty vitals")
         flags = {}
         for m, v in scoring["new_measurement_flags"].items():
             flags[m] = "always" if v == "always" else tuple(v)
@@ -107,6 +118,8 @@ class ScoringConfig:
             unfavourable=dict(scoring["unfavourable"]),
             new_flags=flags,
             baseline_full_n=float(c["baseline_full_n"]),
+            baseline_full_n_by_origin={k: float(v) for k, v in (c.get("baseline_full_n_by_origin") or {}).items()},
+            measurable_metrics={k: tuple(v) for k, v in (scoring.get("measurable_metrics") or {}).items()},
             fresh_full_minutes=float(c["fresh_full_minutes"]),
             fresh_zero_minutes=float(c["fresh_zero_minutes"]),
             trend_window=float(t["window"]),

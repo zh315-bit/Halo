@@ -104,7 +104,8 @@ Judging criteria that drive design:
   `live_crew_id: LIVE_01`, `config/scan.yaml`).
 - Mapping (`core.reading_from_scan(record, crew_id, scan_cfg, scoring_cfg)`): `session_id → reading_id`,
   `created_at → timestamp`, `heart_bpm → heart_rate_bpm` only if `heart_quality ≥ 0.35` (`team_derived`; below or
-  missing → missing, the reason in `scan_context.excluded`), `breathing_brpm → resp_rate_bpm`, `blink_rate_per_min`
+  missing → missing, the reason in `scan_context.excluded`), `breathing_brpm → resp_rate_bpm` only if
+  `breathing_quality ≥ 0.35` (the scan page's `QUALITY_MIN`; below or missing → missing, reason in `excluded`), `blink_rate_per_min`
   kept (never scored), `activity = resting`, `measurement_origin = data_origin = camera_scan`,
   `display_label = "Live camera measurement (experimental)"`. **SpO₂, BP and temperature are missing** (the camera
   does not measure them), never normal. Both new-reading flags are set: every value in a scan is a new measurement.
@@ -113,6 +114,12 @@ Judging criteria that drive design:
 - **Separation:** a crew is either live (`live_data_origins: [camera_scan]`) or synthetic; `Engine.update` and
   `score()` raise on a mix (API → 409), so a scan is never scored against CREW_01's baseline. `/admin/replay`
   `reset` clears only the crews in the replayed file.
+- `core.latest_scan(crew_id) -> dict | None`: the crew's last scan record exactly as the scan page posted it (copy;
+  field names as in the fixture), used by the SOS (§8.6). None for a synthetic or unknown crew.
+- **Persistence:** every accepted, non-duplicate scan is appended to `data/live_scans.jsonl` (git-ignored; env
+  `HALO_LIVE_SCANS_FILE`) as `{crew_id, received_at, record}`. At startup (after `HALO_WARMUP_CSV`) the file is fed
+  back through the same ingest path in order, so live baselines survive a restart. Replay never touches it;
+  `DELETE /api/v1/admin/live-scans?crew_id=` clears it.
 
 ### Not available
 Emergency scenarios, sleep stages, mood and cabin CO₂ are not in the data. Sleep is **estimated from
@@ -140,8 +147,9 @@ Severity is `0–3`. External level names `watch` / `act` (threshold JSONs) map 
 | **GET /api/v1/crew/{crew_id}/daily-report?date=** | daily report | **Chris** |
 | **POST /api/v1/admin/mode** | toggle online/offline (demo) | **Chris** |
 | **POST / GET / DELETE /api/v1/admin/replay** | demo feed until M1: POST `{file, speed=60, reset=true}` → **202** `ReplayStatus` (feeds a `data/*.csv` into the live Engine at `speed`× real time via `Engine.update`; 409 if one is running; only files inside `data/`; `reset` clears only the crews in that file); GET = progress; DELETE = stop. Startup warm-up: env `HALO_WARMUP_CSV=<file in data/>` | **Chris** |
-| **POST /api/v1/scan** | camera scan ingest: `{crew_id?, record}` (crew_id default `live_crew_id`) → `{accepted, duplicate, crew_id, reading_id, reading: VitalsReading, score: ScoreResult}`. Same `session_id` again → `duplicate: true`, nothing re-scored; older than the crew's last reading or a synthetic crew_id → 409; bad record → 422 | **Chris** |
+| **POST /api/v1/scan** | camera scan ingest: `{crew_id?, record}`, or the record itself with an optional `crew_id` key (crew_id default `live_crew_id`); accepted scans are persisted (§5) → `{accepted, duplicate, crew_id, reading_id, reading: VitalsReading, score: ScoreResult}`. Same `session_id` again → `duplicate: true`, nothing re-scored; older than the crew's last reading or a synthetic crew_id → 409; bad record → 422 | **Chris** |
 | **POST /api/v1/scan/upload** | fallback: multipart `file` (a scan JSON: one record, `{crew_id, record}` or a list) + optional form `crew_id` → `{accepted: n, results: [same as /scan]}` (list ingested oldest first; > 2 MB → 413) | **Chris** |
+| **DELETE /api/v1/admin/live-scans?crew_id=** | remove persisted scans of one live crew (omit = all live crews) from `data/live_scans.jsonl` and forget those crews in the Engine → `{cleared_crews, removed_records, file}`; a synthetic crew_id → 409 | **Chris** |
 | **GET /api/v1/crews** | `{crews: [{crew_id, source: synthetic\|live, data_origin, readings, latest_reading_id, latest_as_of, latest_status, display_label, baseline_building}]}`; the configured live crew is always listed (0 readings until its first scan) | **Chris** |
 
 `/classify` is an addition to the design doc: it keeps classification separate from session start.
@@ -365,7 +373,10 @@ Additions (2026-11-14): `crew_source: synthetic | live`; `sleep.source: in_bed_e
   `scan_verdict` is the scan page's own result, shown verbatim and labelled "Scan verdict"; it never changes
   `duty_status`, `watch_items` or the score. Duty = worst debounced status of the last `duty_consecutive` scans
   (red flags of that day count at once); no scan that day or nothing assessable (baseline building) → `caution`.
-  `watch_items` names the vitals the scan did not measure and any dropped heart rate.
+  `watch_items` names the vitals the scan did not measure and any dropped heart rate / breathing rate.
+- When duty is `caution` only because the baseline is still building (no assessable reading, `baseline_building`
+  set), `watch_items` has "Baseline building (n/needed): not enough history to compare yet" and the summary says
+  "Caution because your personal baseline is still building (n/needed): not enough history to compare yet." (any crew).
 - Any crew: a reading on which no vital could be assessed (all `insufficient`) is not used for duty, so a building
   baseline never gives `ready`.
 - `environment_context` adds optional `reference_date, dose_day_ugy, level, threshold_source, source,
@@ -435,7 +446,10 @@ Red flags override the baseline and set the indicator to `alert`. Values are **p
 - `confidence = baseline_term × freshness_term × completeness_term`:
   - baseline_term: mean of `min(1, n/12)`
   - freshness_term: 1 if the last new reading is ≤ 30 min old, falling linearly to 0 at 6 h
-  - completeness_term: `1 − missing_fraction`
+  - completeness_term: present / measurable vitals. **Measurable** per data origin (`scoring.yaml
+    measurable_metrics`, `team_derived`, 2026-11-14): `camera_scan` = HR + resp; others = all six. The baseline term
+    also averages over the measurable vitals only, with `baseline_full_n_by_origin` (`camera_scan: 3` = its
+    `min_points`). Unmeasurable vitals are still reported as missing, never normal.
 - Provide both `score(readings) -> list[ScoreResult]` (batch) and a stateful `Engine.update(reading) -> ScoreResult`
   (for the WS feed). **They must give identical results** on the same data.
 
@@ -593,8 +607,9 @@ camera_scan`, fed by main's `POST /api/v1/scan`). Everything live is labelled **
   summaries used) and replayed/simulated readings ("Replayed demo or simulated data (not a live measurement)").
   The two are never merged; a block is `null` when empty.
 - **Smoke:** `uv run python scripts/smoke_sos.py` — `demo` (CREW_01) and `scan` (POST the fixture as `LIVE_01` →
-  SOS → `camera_scan`, missing + note, `scan_context`, `live_data`). `scan` is SKIPPED until `/api/v1/scan` exists.
-  Assumed request body: the scan record plus `crew_id` (`scan_body()` in the script).
+  SOS → `camera_scan`, missing + note, `scan_context`, `live_data`). `/api/v1/scan` exists on main (2026-11-14),
+  so `scan` must PASS. Request body: the scan record plus `crew_id` (`scan_body()`); `/scan` also accepts
+  `{crew_id, record}`. `core.latest_scan` is provided by main.
 
 ## 9. M5 — Daily report
 

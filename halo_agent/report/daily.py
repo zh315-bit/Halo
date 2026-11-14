@@ -115,6 +115,11 @@ def _pct(x: float, ref: float) -> float:
     return round((x - ref) / ref * 100, 1)
 
 
+def baseline_wait_text(building: dict) -> str:
+    """Watch item when duty is caution only because the personal baseline is still building."""
+    return f"{building['label']}: not enough history to compare yet"
+
+
 def _assessable(sc: ScoreResult) -> bool:
     return any(i.status != "insufficient" for i in sc.indicators if i.metric in VITAL_METRICS)
 
@@ -183,8 +188,8 @@ def build_live_report(crew_id: str, d: date, history: list[tuple[VitalsReading, 
     else:
         r, sc = scan
         if sc.baseline_building:
-            watch.append(f"{sc.baseline_building['label']}: vitals are not compared with a personal baseline "
-                         f"until {sc.baseline_building['needed']} scans.")
+            watch.append(baseline_wait_text(sc.baseline_building) if duty_level is None else
+                         f"{sc.baseline_building['label']}: some vitals are not compared with your baseline yet.")
         missing = [_LABEL[m] for m in VITAL_METRICS if r.value(m) is None]
         if missing:
             watch.append(f"Not measured in this scan: {', '.join(missing)}. Missing, not assumed normal.")
@@ -231,7 +236,8 @@ def build_live_report(crew_id: str, d: date, history: list[tuple[VitalsReading, 
                                    is not None else []),
         "disclaimer": DISCLAIMER,
     }
-    report["summary_text"] = live_summary_text(report, duty_level, len(recent), rcfg.duty_consecutive)
+    wait = scan[1].baseline_building if scan and duty_level is None else None
+    report["summary_text"] = live_summary_text(report, duty_level, len(recent), rcfg.duty_consecutive, wait)
     return report
 
 
@@ -283,8 +289,12 @@ def build_daily_report(crew_id: str, d: date, history: list[tuple[VitalsReading,
                                   if (x.metric, x.rule_id) in found):
         duty = rcfg.duty_map["alert"]
     watch: list[str] = []
+    wait = None
     if not morning:
-        watch.append("No assessable resting vitals in the morning window. Missing, not assumed normal.")
+        wait = next((s.baseline_building for r, s in reversed(morning_all)
+                     if r.activity == "resting" and s.baseline_building), None)
+        watch.append(baseline_wait_text(wait) if wait else
+                     "No assessable resting vitals in the morning window. Missing, not assumed normal.")
     latest_text = {}
     for _, sc in morning_all:                       # most recent wording of each finding that counted
         for x in sc.reasons:
@@ -323,5 +333,5 @@ def build_daily_report(crew_id: str, d: date, history: list[tuple[VitalsReading,
         "disclaimer": DISCLAIMER,
     }
     report["summary_text"] = summary_text(report, duty_level, len(morning), rcfg.morning_window_hours,
-                                          rcfg.duty_consecutive)
+                                          rcfg.duty_consecutive, wait)
     return report

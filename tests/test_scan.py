@@ -43,6 +43,7 @@ def scan(day: int, resp: float, hr=None, quality=0.6, **extra) -> dict:
 def client(monkeypatch, tmp_path):
     monkeypatch.setenv("ALERT_MODE", "dry_run")
     monkeypatch.setenv("HALO_SOS_LOG_DIR", str(tmp_path))
+    monkeypatch.setenv("HALO_LIVE_SCANS_FILE", str(tmp_path / "live_scans.jsonl"))
     old = core.get_engine()
     eng = core.Engine(CFG)
     core.set_engine(eng)
@@ -173,7 +174,8 @@ def test_first_scan_report_is_not_ready(client):
     assert rep["duty_status"] == "caution"                               # nothing assessable: never "ready"
     assert rep["morning_activity"]["tests"][0]["vs_baseline_pct"] is None  # < 3 earlier scans
     assert rep["sleep"]["self_report_vs_baseline_hours"] is None
-    assert any(w.startswith("Baseline building (0/3)") for w in rep["watch_items"])
+    assert "Baseline building (0/3): not enough history to compare yet" in rep["watch_items"]
+    assert "Caution because your personal baseline is still building (0/3): not enough history" in rep["summary_text"]
     empty = client.get("/api/v1/crew/LIVE_01/daily-report?date=2026-11-20").json()
     assert empty["duty_status"] == "caution" and empty["scan_verdict"] is None
     assert "No camera scan on this date. Missing, not assumed normal." in empty["watch_items"]
@@ -244,3 +246,81 @@ def test_cors(client, origin, allowed):
 def test_every_vital_reported():
     res = core.Engine(CFG).update(reading_from_scan(RECORD, None, SCAN_CFG, CFG))
     assert [i.metric for i in res.indicators][:len(VITAL_METRICS)] == list(VITAL_METRICS)
+
+
+# ---------- latest_scan, breathing gate, per-origin confidence, persistence ----------
+RECORD_2 = json.loads((FIXTURE.parent / "scan_record_sample_2.json").read_text())   # second real scan
+
+
+def test_latest_scan_is_the_posted_record(client):
+    assert core.latest_scan("LIVE_01") is None
+    client.post("/api/v1/scan", json={"record": RECORD})
+    assert core.latest_scan("LIVE_01") == RECORD
+    client.post("/api/v1/scan", json={"record": RECORD_2})
+    got = core.latest_scan("LIVE_01")
+    assert got == RECORD_2
+    got["verdict"] = "changed"                                   # a copy: callers can't edit Engine state
+    assert core.latest_scan("LIVE_01")["verdict"] == RECORD_2["verdict"]
+    assert core.latest_scan("CREW_01") is None and core.latest_scan("NOBODY") is None
+
+
+def test_breathing_quality_gate():
+    r2 = reading_from_scan(RECORD_2, None, SCAN_CFG, CFG)     # real record: breathing null anyway
+    assert r2.resp_rate_bpm is None
+    low = reading_from_scan(dict(RECORD, breathing_quality=0.34), None, SCAN_CFG, CFG)
+    assert low.resp_rate_bpm is None
+    assert low.scan_context["excluded"]["resp_rate_bpm"] == "breathing_quality 0.34 < 0.35"
+    none = reading_from_scan(dict(RECORD, breathing_quality=None), None, SCAN_CFG, CFG)
+    assert none.resp_rate_bpm is None and none.scan_context["excluded"]["resp_rate_bpm"] == "breathing_quality missing"
+    ok = reading_from_scan(dict(RECORD, breathing_quality=0.35), None, SCAN_CFG, CFG)
+    assert ok.resp_rate_bpm == 10.3 and ok.scan_context["breathing_quality"] == 0.35
+
+
+def test_camera_confidence_counts_only_measurable_vitals():
+    eng = core.Engine(CFG)
+    res = [eng.update(reading_from_scan(scan(d, 11 + d % 2, hr=60 + d % 2), None, SCAN_CFG, CFG)) for d in range(4)]
+    last = res[-1]
+    assert last.baseline_quality == "ok" and last.baseline_building is None
+    assert last.confidence == 1.0                     # HR + resp present, fresh, 3-scan baselines; BP etc. not counted
+    ind = {i.metric: i for i in last.indicators}
+    assert all(ind[m].status == "insufficient" for m in NOT_MEASURED)   # still reported as missing, never normal
+    no_hr = eng.update(reading_from_scan(scan(4, 11), None, SCAN_CFG, CFG))   # HR missing
+    assert no_hr.confidence == 0.25            # completeness 1/2 and the missing HR has no baseline n (§7.5)
+
+
+def test_scans_persist_and_restore(client, tmp_path):
+    f = tmp_path / "live_scans.jsonl"
+    client.post("/api/v1/scan", json={"record": RECORD})
+    client.post("/api/v1/scan", json={"record": RECORD})               # duplicate: not written again
+    client.post("/api/v1/scan", json={"crew_id": "LIVE_02", "record": scan(1, 11)})
+    client.post("/api/v1/scan", json={"crew_id": "CREW_01", "record": scan(2, 11)})   # 409: not written
+    rows = [json.loads(x) for x in f.read_text().splitlines()]
+    assert [(x["crew_id"], x["record"]["session_id"]) for x in rows] == [
+        ("LIVE_01", RECORD["session_id"]), ("LIVE_02", "SIMULATED-scan-1")]
+    assert rows[0]["record"] == RECORD
+
+    before = core.score_latest("LIVE_01").to_dict()
+    core.set_engine(core.Engine(CFG))                                 # "restart"
+    from halo_agent.api import routes_scan
+    assert routes_scan.load_persisted() == 2
+    assert core.score_latest("LIVE_01").to_dict() == before and core.latest_scan("LIVE_01") == RECORD
+
+    client.post("/api/v1/admin/replay", json={"file": "qr_scan_demo_clean.csv", "speed": 1_000_000, "reset": True})
+    t0 = time.time()
+    while client.get("/api/v1/admin/replay").json()["state"] == "running" and time.time() - t0 < 10:
+        time.sleep(0.02)
+    assert len(f.read_text().splitlines()) == 2 and core.score_latest("LIVE_01") is not None
+
+    assert client.delete("/api/v1/admin/live-scans?crew_id=CREW_01").status_code == 409
+    d = client.delete("/api/v1/admin/live-scans?crew_id=LIVE_02").json()
+    assert d["cleared_crews"] == ["LIVE_02"] and d["removed_records"] == 1
+    assert core.score_latest("LIVE_02") is None and core.score_latest("LIVE_01") is not None
+    d = client.delete("/api/v1/admin/live-scans").json()
+    assert d["cleared_crews"] == ["LIVE_01"] and d["removed_records"] == 1 and f.read_text() == ""
+    assert core.score_latest("LIVE_01") is None and core.score_latest("CREW_01") is not None
+
+
+def test_flat_body_is_accepted(client):
+    r = client.post("/api/v1/scan", json={**RECORD, "crew_id": "LIVE_03"})   # what scripts/smoke_sos.py sends
+    assert r.status_code == 200 and r.json()["crew_id"] == "LIVE_03"
+    assert core.latest_scan("LIVE_03") == RECORD

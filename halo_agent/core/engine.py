@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import logging
 import threading
 import time
@@ -147,6 +148,15 @@ class Engine:
                     ages[m] = round((now - ms.last_new_ts).total_seconds(), 1)
             return LatestReading(**asdict(r), measured_at=measured, metric_age_seconds=ages,
                                  age_seconds=round((now - r.timestamp).total_seconds(), 1))
+
+    def latest_scan(self, crew_id: str) -> Optional[dict]:
+        """The crew's last scan record exactly as the scan page posted it (copy), or None."""
+        with self._lock:
+            st = self._crews.get(crew_id)
+            for r, _ in reversed(st.log if st else ()):
+                if r.raw_scan is not None:
+                    return copy.deepcopy(r.raw_scan)
+        return None
 
     def history(self, crew_id: str) -> list[tuple[VitalsReading, ScoreResult]]:
         """(reading, score) pairs this Engine produced for the crew, oldest first (bounded)."""

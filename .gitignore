@@ -4,6 +4,8 @@ __pycache__/
 .env
 out/
 data/sos_sessions/
+data/live_scans.jsonl
+data/live_scans.jsonl.tmp
 .pytest_cache/
 data/llm_cache.json
 data/llm_cache.json.tmp

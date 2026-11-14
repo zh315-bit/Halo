@@ -22,6 +22,7 @@ app.add_middleware(CORSMiddleware, allow_origins=list(_cors["allow_origins"]),
 # Process-wide live engine behind core.score_latest(); the reading feed (M1 / WS) calls core.get_engine().update().
 core.set_engine(core.Engine(load_scoring_config()))
 replay.warmup_from_env()     # HALO_WARMUP_CSV=qr_scan_demo_clean.csv -> score_latest works before M1 exists
+routes_scan.load_persisted() # real camera scans from data/live_scans.jsonl: live baselines survive a restart
 
 # sos-v2: create nudges as scores change (§8.5). After warm-up, so only live updates nudge.
 routes_sos.attach_nudges(core.get_engine())

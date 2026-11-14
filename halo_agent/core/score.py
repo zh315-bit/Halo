@@ -80,17 +80,21 @@ def assemble(reading: VitalsReading, per_metric: dict[str, tuple[MetricEval, Opt
     baseline_quality = max(quals, key=QUALITY_RANK.__getitem__) if quals else "insufficient"
 
     # confidence = baseline_term × freshness_term × completeness_term   (AGENTS.md §7.5)
-    #   baseline_term     = mean over the 6 vitals of min(1, n / baseline_full_n); n = 0 without a baseline
+    #   M = the vitals this data_origin can measure (scoring.yaml measurable_metrics; default all 6)
+    #   baseline_term     = mean over M of min(1, n / baseline_full_n[origin]); n = 0 without a baseline
     #   freshness_term    = mean over present vitals of f(minutes since that vital's last NEW measurement),
     #                       f = 1 up to fresh_full_minutes, linear down to 0 at fresh_zero_minutes
-    #   completeness_term = 1 − (missing vitals / 6)
+    #   completeness_term = present vitals in M / |M|
     # With no assessable vital the product is 0, so a "normal" status with confidence 0 means "unknown".
-    b_term = sum(min(1.0, (i.baseline.n if i.baseline else 0) / cfg.baseline_full_n) for i in vit) / len(vit)
-    f_term = (sum(_freshness(per_metric[m][1], cfg) for m in present) / len(present)) if present else 0.0
-    c_term = len(present) / len(VITAL_METRICS)
-    confidence = round(b_term * f_term * c_term, 3)
-
     origin = data_origin_of(reading, cfg)
+    measurable = cfg.measurable_for(origin)
+    full_n = cfg.baseline_full_n_for(origin)
+    by_metric = {i.metric: i for i in vit}
+    b_term = sum(min(1.0, (by_metric[m].baseline.n if by_metric[m].baseline else 0) / full_n)
+                 for m in measurable) / len(measurable)
+    f_term = (sum(_freshness(per_metric[m][1], cfg) for m in present) / len(present)) if present else 0.0
+    c_term = sum(m in present for m in measurable) / len(measurable)
+    confidence = round(b_term * f_term * c_term, 3)
     building = [per_metric[m][0].building_n for m in present if per_metric[m][0].building_n is not None]
     need = cfg.min_points_for(origin)
     baseline_building = ({"n": min(building), "needed": need, "label": f"Baseline building ({min(building)}/{need})"}

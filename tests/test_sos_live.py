@@ -184,7 +184,6 @@ def test_smoke_scan_scenario_passes_with_a_scan_endpoint(env, capsys):
     assert "FAIL" not in out and "Not measured by camera scan" in out
 
 
-def test_smoke_scan_scenario_skips_without_endpoint(env):
+def test_smoke_scan_scenario_passes_with_endpoint(env):
     smoke = _smoke()
-    with pytest.raises(smoke.Skip):
-        smoke.scan(env["c"])
+    smoke.scan(env["c"])          # main now provides POST /api/v1/scan: the scenario must run, not skip

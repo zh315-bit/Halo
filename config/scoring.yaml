@@ -62,7 +62,9 @@ new_measurement_flags:
   body_temp_c: [temp]
 
 confidence:
-  baseline_full_n: 12        # baseline_term = mean(min(1, n / 12))
+  baseline_full_n: 12        # baseline_term = mean(min(1, n / 12)) over the vitals the data origin can measure
+  baseline_full_n_by_origin: # team_derived: a live camera crew's baseline is complete at its min_points (3 scans)
+    camera_scan: 3
   fresh_full_minutes: 30     # freshness 1.0 up to here ...
   fresh_zero_minutes: 360    # ... falling linearly to 0 at 6 h
 
@@ -75,6 +77,12 @@ data_origin:                 # measurement_origin -> data_origin. Unknown origin
 # Real measurements ("live" crews). A crew never mixes live and synthetic readings, so a real scan is never
 # compared with a demo/simulated baseline (e.g. CREW_01).
 live_data_origins: [camera_scan]
+
+# Vitals each data origin can measure (team_derived). Confidence's baseline and completeness terms use only these,
+# so a camera scan is not marked down for BP / SpO2 / temperature it can never measure. Unlisted origins: all six.
+# Unmeasurable vitals are still reported as missing (status insufficient), never normal.
+measurable_metrics:
+  camera_scan: [heart_rate_bpm, resp_rate_bpm]
 
 metrics:                     # display only (reason text)
   heart_rate_bpm: {label: heart rate, unit: bpm}

@@ -12,7 +12,13 @@ def _n(x: float) -> str:
     return f"{x:g}"
 
 
-def summary_text(rep: dict, level: Optional[str], n_morning: int, window_h: float, consecutive: int) -> str:
+def _wait_sentence(wait: dict) -> str:
+    return (f"Caution because your personal baseline is still building ({wait['n']}/{wait['needed']}): "
+            f"not enough history to compare yet.")
+
+
+def summary_text(rep: dict, level: Optional[str], n_morning: int, window_h: float, consecutive: int,
+                 wait: Optional[dict] = None) -> str:
     parts = [f"Duty status: {rep['duty_status'].upper()}."]
     mins = rep["sleep"]["in_bed_minutes"]
     if mins is None:
@@ -30,7 +36,9 @@ def summary_text(rep: dict, level: Optional[str], n_morning: int, window_h: floa
         if ma["vs_baseline_pct"] is not None:
             s += f" ({_n(ma['vs_baseline_pct'])} % vs your usual)"
         parts.append(s + ".")
-    if level is None:
+    if level is None and wait:
+        parts.append(_wait_sentence(wait))
+    elif level is None:
         parts.append(f"No resting vitals in the last {_n(window_h)} h before the report.")
     else:
         parts.append(f"Resting vitals over the last {_n(window_h)} h ({n_morning} readings): {level} "
@@ -52,7 +60,8 @@ def summary_text(rep: dict, level: Optional[str], n_morning: int, window_h: floa
     return " ".join(parts)
 
 
-def live_summary_text(rep: dict, level: Optional[str], n_scans: int, consecutive: int) -> str:
+def live_summary_text(rep: dict, level: Optional[str], n_scans: int, consecutive: int,
+                      wait: Optional[dict] = None) -> str:
     """Summary for a live camera-scan crew. Only numbers that are in the structured fields."""
     parts = [f"Duty status: {rep['duty_status'].upper()}."]
     sl = rep["sleep"]
@@ -72,7 +81,9 @@ def live_summary_text(rep: dict, level: Optional[str], n_scans: int, consecutive
                 b += f" ({_n(t['vs_baseline_pct'])} % vs your earlier scans)"
             bits.append(b)
         parts.append("Scan tests: " + ", ".join(bits) + ".")
-    if level is None:
+    if level is None and wait:
+        parts.append(_wait_sentence(wait))
+    elif level is None:
         parts.append("No vitals from the camera scan could be compared with your personal baseline yet.")
     else:
         parts.append(f"Camera-scan vitals over your last {n_scans} scan(s): {level} (a level counts after "

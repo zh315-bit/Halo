@@ -2,6 +2,7 @@
 # (repo Dhruvachaitanya13/Halo, table `scans` in scan/supabase_schema.sql). All values team_derived.
 live_crew_id: LIVE_01           # crew_id used when the request gives none
 min_heart_quality: 0.35         # heart_bpm with heart_quality below this (or missing) is dropped -> missing
+min_breathing_quality: 0.35     # same for breathing_brpm / breathing_quality (the scan page's QUALITY_MIN)
 activity: resting               # the scan is taken seated at rest
 measurement_origin: camera_scan # -> data_origin camera_scan (scoring.yaml)
 display_label: "Live camera measurement (experimental)"
