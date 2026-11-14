@@ -38,6 +38,7 @@ HALO_WARMUP_CSV=qr_scan_demo_clean.csv ALERT_MODE=dry_run uv run uvicorn halo_ag
 | `baseline` | loads the replayed QR demo crew `CREW_01` at once, online |
 | `drift` | loads the SIMULATED 7-day drift crew `SIM_CREW_DRIFT` at once (rising resting HR, falling SpO₂) |
 | `drift_live` | replays the same drift at 3600× (about 3 min), so the dashboard can watch it move |
+| `sos_event` | replays the SIMULATED acute event crew `SIM_CREW_SOS` at 3600× (about 57 s): baseline, then SpO₂ drops → `spo2_low` red flag, alert, nudge (see "SOS event scene" below) |
 | `offline` | "pulls the network": offline mode, data unchanged |
 | `reset` | forgets every synthetic crew, back online, mission environment from config |
 
@@ -46,7 +47,6 @@ How every scene behaves:
 - It resets only the crews it loads.
 - It never touches live camera crews or `data/live_scans.jsonl`.
 
-There is no SOS-event scene yet: its data is waiting for the data owner's OK.
 
 ## Camera scan ingest (scan page → HALO)
 
@@ -216,7 +216,7 @@ queued as designed).
 ## SOS event scene (for `config/demo.yaml`, owned by main)
 
 `data/SIMULATED_sos_event.csv` (from `scripts/make_sos_scenario.py`, SIMULATED, crew `SIM_CREW_SOS`) is ready.
-Add this scene to `config/demo.yaml` (and drop the "There is no SOS-event scene yet" comment there):
+It is in `config/demo.yaml` as:
 
 ```yaml
   sos_event:

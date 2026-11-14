@@ -5,7 +5,6 @@
 #   replay: {file, speed}  -> start a background replay (reset = only that file's crews)
 #   mode: online|offline   -> same as POST /admin/mode
 #   mission_env: microgravity|partial_gravity|post_landing|config  (config = back to config/app.yaml)
-# There is no SOS-event scene yet: SIMULATED_sos_event.csv waits for the data owner's OK (AGENTS ⚑ Q4).
 scenes:
   baseline:
     description: "Replayed QR demo crew CREW_01 (2 mission days, demo playback), online."
@@ -18,6 +17,10 @@ scenes:
   drift_live:
     description: "Same SIMULATED drift, replayed at 3600x (one hour per second, about 3 min in all)."
     replay: {file: SIMULATED_drift_7d.csv, speed: 3600}
+    mode: online
+  sos_event:
+    description: "SIMULATED acute event crew SIM_CREW_SOS: calm 2-day baseline, then SpO2 drops to 86 % with HR rising -> spo2_low red flag, alert, nudge to the breathing checklist."
+    replay: {file: SIMULATED_sos_event.csv, speed: 3600}
     mode: online
   offline:
     description: "Pull the network: offline mode, data unchanged (LLM features fall back, alerts queue)."

@@ -71,3 +71,8 @@ def test_drift_live_replays_and_scene_switch_stops_it(c):
 
 def test_unknown_scene(c):
     assert c.post("/api/v1/admin/demo/nope").status_code == 404
+
+
+def test_sos_event_scene_replays_the_event_file(c):
+    j = c.post("/api/v1/admin/demo/sos_event").json()
+    assert j["replay"]["file"] == "SIMULATED_sos_event.csv" and j["replay"]["speed"] == 3600 and j["mode"] == "online"
