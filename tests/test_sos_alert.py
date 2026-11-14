@@ -118,6 +118,9 @@ def test_offline_queues_then_flushes_when_online(make):
 
 
 def test_recipient_cannot_come_from_request(make):
-    c, _, _ = make("dry_run")
-    r = c.post("/api/v1/sos", json={"crew_id": "CREW_01", "symptom": "chest_pain", "to": "+19999999999"})
-    assert r.status_code == 422
+    # Request models ignore unknown fields (main: _Request), so a smuggled `to` is dropped, never used.
+    c, fake, _ = make("live")
+    r = c.post("/api/v1/sos", json={"crew_id": "CREW_01", "symptom": "chest_pain", "to": "+19999999999",
+                                    "MISSION_SUPPORT_NUMBER": "+19999999999"})
+    assert r.status_code == 200
+    assert [call["to"] for call in fake.calls] == ["+15550000002"]

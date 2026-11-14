@@ -240,11 +240,11 @@ class SosStepRequest(_Request):
     step_id: Optional[str] = None          # sos-v0 addition: if sent and != current step -> 409 (double tap)
 
 
-class SosAckRequest(_Strict):                                           # sos-v0 addition
+class SosAckRequest(_Request):                                           # sos-v0 addition
     by: str = Field(min_length=1, max_length=64)
 
 
-class SosResolveRequest(_Strict):                                       # sos-v0 addition
+class SosResolveRequest(_Request):                                       # sos-v0 addition
     outcome: Literal["resolved", "handed_off"] = "resolved"
 
 
@@ -275,7 +275,7 @@ class ClassifyResponse(_Strict):
     low_confidence: bool = False          # sos-v0: best candidate below min_classification_confidence -> escalates
 
 
-class SosConfirmRequest(_Strict):         # sos-v0: crewmate confirms one problem type after /classify (or picker)
+class SosConfirmRequest(_Request):         # sos-v0: crewmate confirms one problem type after /classify (or picker)
     symptom: str
 
 
