@@ -19,6 +19,100 @@ uv run uvicorn halo_agent.api.app:app --port 8000
   `POST /api/v1/admin/replay {"file": "SIMULATED_drift_7d.csv", "speed": 600}`.
 - Offline mode: `HALO_OFFLINE=1`, or `POST /api/v1/admin/mode {"mode": "offline"}`.
 
+No `.env`, API key or optional extra is needed for the above: the LLM features fall back automatically and SOS
+alerts are a dry run (nothing is sent).
+
+## Crew SOS: try it
+
+Start the server with the demo feed so the SOS has vitals and a score to show:
+
+```bash
+HALO_WARMUP_CSV=qr_scan_demo_clean.csv uv run uvicorn halo_agent.api.app:app --port 8000
+```
+
+If port 8000 is taken, use another `--port` and change it in the commands below.
+Then, in another terminal (interactive docs: <http://localhost:8000/docs>):
+
+```bash
+# problem types: chest_pain, breathing_difficulty, fainting, bleeding_injury, other
+curl -s localhost:8000/api/v1/sos/problem-types
+
+# start a session -> state, step 1, vitals, score, alert status (copy session_id from the reply)
+curl -s -X POST localhost:8000/api/v1/sos -H 'Content-Type: application/json' \
+  -d '{"crew_id": "CREW_01", "symptom": "chest_pain"}'
+
+# answer the current step: done | cannot_do | condition_changed | skip
+curl -s -X POST localhost:8000/api/v1/sos/SESSION_ID/step -H 'Content-Type: application/json' \
+  -d '{"action": "done"}'
+
+# ground confirms receipt, then end the session (resolved | handed_off)
+curl -s -X POST localhost:8000/api/v1/sos/SESSION_ID/ack -H 'Content-Type: application/json' -d '{"by": "capcom"}'
+curl -s -X POST localhost:8000/api/v1/sos/SESSION_ID/resolve -H 'Content-Type: application/json' \
+  -d '{"outcome": "resolved"}'
+```
+
+| Endpoint | What it does |
+|---|---|
+| `GET /api/v1/sos/{id}` | full session for polling (step, vitals, score, alerts, event log) |
+| `POST /api/v1/sos` with `{"crew_id", "free_text"}` | starts the generic `other` checklist at once; then `/classify` → crewmate picks → `/confirm` |
+| `POST /api/v1/sos/{id}/classify` `{"free_text"}` | top-3 problem types (LLM) or the full picker (no LLM / offline) |
+| `POST /api/v1/sos/{id}/confirm` `{"symptom"}` | switches to that checklist (logged as `checklist_switched`) |
+| `POST /api/v1/agent/ask` `{"question", "session_id"}` | explains the current step only; otherwise a fixed reply |
+| `GET /api/v1/crew/{crew_id}/nudges` | proactive "check on your crewmate" suggestions when a score turns `alert` |
+| `GET /api/v1/sos/ground-reports` | non-urgent reports for the flight surgeon (never texted) |
+
+Demo switches:
+
+```bash
+# "pull the network": alerts queue for ground, LLM features fall back
+curl -s -X POST localhost:8000/api/v1/admin/mode -H 'Content-Type: application/json' -d '{"mode": "offline"}'
+# mission environment for NEW sessions: microgravity | partial_gravity (default) | post_landing
+curl -s -X POST localhost:8000/api/v1/admin/mode -H 'Content-Type: application/json' -d '{"mission_env": "microgravity"}'
+```
+
+Session logs are written to `data/sos_sessions/` (git-ignored): one `.jsonl` per session, plus a `.json` export when
+it ends. Full contract: AGENTS.md §6.4 and §8.
+
+### SOS checklists: sources and review status
+
+Converted verbatim from the team's `sos_checklists_v2.yaml` into `config/checklists/` (shared source table:
+`config/checklists/_sources.yaml`). **All five are "Sourced, not medically reviewed"**; the UI always shows that label.
+
+| Checklist | Sources cited | Verified |
+|---|---|---|
+| `chest_pain_v2` | NASA Medical Checklist JSC-48031 Rev H; DGLRM/ESAM microgravity CPR guideline (2020); MedlinePlus; HALO team policy (medication step, not a medical source) | **no** |
+| `breathing_difficulty_v2` | NASA Medical Checklist JSC-48031 Rev H; DGLRM/ESAM CPR guideline; MedlinePlus; HALO team policy (medication step) | **no** |
+| `fainting_v2` | NASA Medical Checklist JSC-48031 Rev H; NASA HRP orthostatic intolerance evidence; DGLRM/ESAM; MedlinePlus | **no** |
+| `bleeding_v2` | NASA Medical Checklist JSC-48031 Rev H; microgravity bloodstain study; MedlinePlus | **no** |
+| `other_v2` | NASA Medical Checklist JSC-48031 Rev H; MedlinePlus; HALO team policy (not a medical source) | **no** |
+
+JSC-48031 page numbers come from a public OCR copy; verify against the PDF before citing them on stage. Numbers the
+sources don't give are shown as `[N — TBD]`. HALO never names a drug or a dose.
+
+### SOS alerts (SMS)
+
+`ALERT_MODE=dry_run` (default) only logs what would be sent. For real SMS: `uv sync --extra alert`, set
+`ALERT_MODE=live` and the four `TWILIO_*` / `MISSION_SUPPORT_NUMBER` variables in `.env`. Twilio trial accounts can
+only text numbers verified in the Twilio console. The recipient is only ever read from `.env`.
+
+## Optional: LLM features (Claude)
+
+Without this, symptom classification falls back to the picker and `/agent/ask` gives a fixed reply. To turn it on:
+
+```bash
+cp .env.example .env          # then put your own key in HALO_LLM_API_KEY (never commit .env)
+uv sync --extra llm
+set -a && . ./.env && set +a  # load .env (uv's --env-file breaks on paths with spaces)
+uv run --extra llm python -m halo_agent.shell.llm     # smoke test: prints "reply: OK" (one paid call)
+HALO_WARMUP_CSV=qr_scan_demo_clean.csv uv run --extra llm uvicorn halo_agent.api.app:app --port 8000
+```
+
+Always keep `--extra llm` on `uv run`, otherwise uv re-syncs the environment and removes the SDK. Model:
+`claude-opus-5-5` (`HALO_LLM_MODEL`), effort `low` (`HALO_LLM_EFFORT`). Answers are cached in
+`data/llm_cache.json` (git-ignored) so the same question shows the same answer; empty it with
+`curl -X DELETE localhost:8000/api/v1/admin/llm-cache`. Live LLM tests (paid, skipped by default):
+`HALO_LIVE_LLM=1 uv run --extra llm pytest tests/test_sos_llm_live.py`.
+
 ## Data: what is real, replayed, historical or simulated
 
 | File | Kind | Notes |
@@ -76,7 +170,7 @@ the symptom picker, a fixed reply and the template text when offline.
 
 - Radiation prediction model: none exists, the UI shows "Model not trained".
 - Bone density in scoring (Phase 4), ML scoring model, face-scan vital-sign algorithms.
-- Daily report LLM rewrite (waits for the shared `LLMClient`). The template report is live:
+- Daily report LLM rewrite (the shared `LLMClient` now exists; the rewrite itself is not built). The template report is live:
   `GET /api/v1/crew/{crew_id}/daily-report?date=` (sleep is estimated from `in_bed` periods; there are no
   sleep stages in the data).
 
