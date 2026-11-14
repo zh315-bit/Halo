@@ -1,0 +1,39 @@
+# DEMO CHECKLIST — not medically reviewed (AGENTS.md §3.1, §8.1, ⚑ Q3).
+# Every step text is the placeholder until the team supplies a public, medically reviewed source.
+# A step with an empty / missing / "TBD" source makes the whole checklist review_status: demo_unreviewed.
+# Fields: id, type (action|observe|confirm), text, source, on_cannot_do (step id | escalate),
+#         optional next (step id | END), optional on_condition_changed (step id; default: stay on this step).
+
+protocol_id: chest_pain_v0
+symptom: chest_pain
+title: Chest pain
+source: {title: null, url: null}
+verified: false
+escalate_if_unresolved_after: c4
+red_flags: []
+steps:
+  - id: c1
+    type: action
+    text: "[PLACEHOLDER — not medical guidance]"
+    source: TBD
+    on_cannot_do: escalate
+  - id: c2
+    type: action
+    text: "[PLACEHOLDER — not medical guidance]"
+    source: TBD
+    on_cannot_do: escalate
+  - id: c3
+    type: observe
+    text: "[PLACEHOLDER — not medical guidance]"
+    source: TBD
+    on_cannot_do: escalate
+  - id: c4
+    type: action
+    text: "[PLACEHOLDER — not medical guidance]"
+    source: TBD
+    on_cannot_do: escalate
+  - id: c5
+    type: confirm
+    text: "[PLACEHOLDER — not medical guidance]"
+    source: TBD
+    on_cannot_do: escalate

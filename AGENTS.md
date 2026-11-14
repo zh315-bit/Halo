@@ -194,26 +194,60 @@ The team draft's fields are kept unchanged. `reading_id`, `indicators` and `reas
   `score_latest(crew_id) -> ScoreResult | None` (None until that crew has been scored).
 
 ### 6.4 `SosSession`
+The Phase 0 fields are unchanged; everything below `disclaimer` is a sos-v0 addition. `score` is now nullable.
 ```json
 {
-  "session_id": "sos_001",
+  "session_id": "sos_1a2b3c4d",
   "crew_id": "CREW_01",
   "symptom": "breathing_difficulty",
   "symptom_source": "picker",
   "protocol_id": "breathing_v0",
-  "step": {"index": 1, "total": 6, "id": "b1", "text": "...", "source_ref": "...",
-           "options": ["done", "cannot_do", "condition_changed"]},
-  "vitals_snapshot": {"reading_id": "QR_DEMO_0001", "age_seconds": 40},
-  "score": {"status": "alert", "severity": 3},
-  "escalation": {"triggered": true, "reasons": ["severity_max"], "channel": "sms",
+  "step": {"index": 1, "total": 6, "id": "b1", "text": "[PLACEHOLDER — not medical guidance]", "source_ref": null,
+           "options": ["done", "cannot_do", "condition_changed", "skip"], "type": "action"},
+  "vitals_snapshot": {"reading_id": "QR_DEMO_0276", "age_seconds": 0, "timestamp": "2026-11-16T09:05:00Z",
+                      "display_label": "Demo data - not measured from your camera", "data_origin": "demo_playback",
+                      "stale": false,
+                      "metrics": {"body_temp_c": {"value": 37.3, "measured_at": "2026-11-16T08:00:00Z",
+                                                  "age_seconds": 3900, "status": "stale"}}},
+  "score": null,
+  "escalation": {"triggered": true, "reasons": ["sos_reported", "cannot_do"], "channel": "sms",
                  "state": "queued_offline", "acknowledged": false},
   "mode": "offline",
-  "disclaimer": "Decision support only. Not a diagnosis."
+  "disclaimer": "Decision support only. Not a diagnosis.",
+  "state": "GUIDING",
+  "review_status": "demo_unreviewed",
+  "checklist_title": "Breathing difficulty",
+  "checklist_complete": false,
+  "started_at": "2026-11-14T17:30:56Z", "ended_at": null, "note": null,
+  "steps_done": [{"step_id": "b1", "action": "done", "at": "…", "actor": "crew"}],
+  "score_reasons": [],
+  "alert": {"mode": "offline_queue", "sms_status": "queued_offline", "call_status": "not_implemented",
+            "acknowledged_at": null, "ack_by": null,
+            "ui_message": "Ground will receive this in ~20 min. Continue the checklist.",
+            "messages": [{"message_id": "sos_1a2b3c4d-m1", "reason": "sos_reported", "channel": "sms",
+                          "state": "queued_offline", "sender": "queue", "sid": null, "attempts": 0,
+                          "error": null, "created_at": "…", "body": "HALO SOS …"}]},
+  "events": [{"seq": 1, "at": "…", "action": "report", "actor": "crew", "state_from": "REPORTED", "state_to": "REPORTED"}]
 }
 ```
 - `symptom_source` ∈ `picker | llm`. If it is `llm`, the UI must get confirmation before the session advances.
-- `escalation.state` ∈ `not_needed | sending | sent | acknowledged | queued_offline | failed`.
-- `mode` ∈ `online | offline`.
+- `step.options` ∈ `done | cannot_do | condition_changed | skip`. When the checklist is finished,
+  `step.id = "END"`, `options = []`, `checklist_complete = true`; the crew then calls `/resolve`.
+- `escalation.state` ∈ `not_needed | sending | sent | acknowledged | queued_offline | failed`. In dry-run mode it
+  is `sent`; **the UI must show `alert.sms_status`** (`not_sent | sending | dry_run | sent | queued_offline | failed`)
+  so a dry run is never presented as a real delivery.
+- `mode` ∈ `online | offline`. `alert.mode` ∈ `dry_run | live | offline_queue`.
+- `state` ∈ `REPORTED | ALERTING | GUIDING | RESOLVED | HANDED_OFF`. Acknowledgement is an overlay
+  (`alert.acknowledged_at`), not a state.
+- `score` is `null` when `halo_agent.core.score_latest` is unavailable or returns `None`; the UI shows
+  "Score unavailable" and the flow continues.
+- `vitals_snapshot.metrics.*.status` ∈ `ok | stale | missing`. `measured_at` is the metric's last **new**
+  measurement (carry-forward excluded). Stale = older than 10 min (`team_derived`).
+- `events[]` are append-only: `seq, at, action, actor, state_from, state_to` plus action-specific keys.
+- SOS endpoints (sos-v0): `GET /api/v1/sos/problem-types`, `POST /api/v1/sos` (`crew_id`, `symptom` | `free_text`,
+  optional `note`), `GET /api/v1/sos/{id}` (polling), `POST /api/v1/sos/{id}/step` (`action`, optional `step_id`:
+  mismatch → 409), `POST /api/v1/sos/{id}/ack` (`by`), `POST /api/v1/sos/{id}/resolve` (`outcome`:
+  `resolved | handed_off`). Illegal transition → 409, unknown session → 404, unknown symptom → 422.
 
 ### 6.5 `DailyReport`
 ```json
@@ -297,53 +331,73 @@ Red flags override the baseline and set the indicator to `alert`. Values are **p
 
 ## 8. M4 — Crew SOS (core state machine + optional shell)
 
-Kavya's four steps: **report → display → guide → alert**, plus a session log.
+Kavya's four steps: **report → display → guide → alert**, plus a session log. Code: `halo_agent/sos/`
+(`protocols.py`, `state_machine.py`, `escalation.py`, `vitals.py`, `session_log.py`, `service.py`). No LLM.
 
-### 8.1 Protocol JSON (M6 content, `protocols/*.json`)
-```json
-{
-  "protocol_id": "breathing_v0",
-  "symptom": "breathing_difficulty",
-  "title": "Breathing difficulty",
-  "source": {"title": null, "url": null},
-  "verified": false,
-  "start": "b1",
-  "steps": {
-    "b1": {"text": "[PLACEHOLDER — not medical guidance]", "source_ref": null,
-           "on": {"done": "b2", "cannot_do": "ESCALATE", "condition_changed": "b1_reassess"},
-           "show_vitals": ["spo2_pct", "resp_rate_bpm", "heart_rate_bpm"]}
-  },
-  "escalate_if_unresolved_after": "b4",
-  "red_flags": ["spo2_low"]
-}
+### 8.1 Checklists (M6 content, `config/checklists/*.yaml`)
+One YAML per problem type: `chest_pain`, `injury`, `breathing_difficulty`, `other` (generic). Parsed outside core
+(`sos/protocols.py`) and validated **at load time**; an invalid file is refused.
+```yaml
+protocol_id: breathing_v0
+symptom: breathing_difficulty
+title: Breathing difficulty
+source: {title: null, url: null}
+verified: false
+escalate_if_unresolved_after: b4
+red_flags: [spo2_low]
+steps:
+  - id: b1
+    type: action            # action | observe | confirm
+    text: "[PLACEHOLDER — not medical guidance]"
+    source: TBD
+    on_cannot_do: escalate  # step id | escalate
+    # optional: next (step id | END, default = following step), on_condition_changed (step id, default = stay)
 ```
-- Next-step values are a step id, `ESCALATE` or `END`. `ESCALATE` triggers escalation **and the checklist
-  continues** at that step's `after_escalate` target (or the next step).
-- Until Kavya names the source ⚑, ship 2–3 protocols with placeholder text and `verified: false`.
-  **Do not write real first-aid steps yourself.**
-- A JSON-schema validator test checks every protocol: no dangling ids, every non-placeholder step has a `source_ref`.
+- `on_cannot_do: escalate` triggers escalation **and the checklist continues** at `next`.
+- `review_status` is `demo_unreviewed` if any step's `source` is missing, empty or `TBD`, or `verified` is not
+  true. The UI always shows "Demo content — not medically reviewed" for `demo_unreviewed`.
+- Validation: unique ids, no dangling `on_cannot_do` / `next` / `on_condition_changed` / `escalate_if_unresolved_after`,
+  valid `type`, known `symptom`, all four problem types present, and **every non-placeholder step needs a real
+  `source`**. All texts are the placeholder until Kavya names the source ⚑. **Do not write real first-aid steps.**
 
-### 8.2 Session flow
-1. **Report:** `POST /sos` with `symptom` (picker), or with `free_text`, which goes through `/classify` →
-   top-3 candidates → crewmate confirms → the session starts.
-2. **Display:** attach the latest vitals (timestamp, `display_label`, age in seconds), the baseline comparison and the `ScoreResult`.
-3. **Guide:** one step at a time; options advance the state machine.
-4. **Alert:** evaluate the escalation conditions after every step and every new reading; emit an event to M7.
-5. **Log:** every step's time, action and vitals snapshot go into an append-only session log (JSONL),
-   exported when communication resumes.
+### 8.2 Session flow and state machine
+`REPORTED → ALERTING → GUIDING → RESOLVED | HANDED_OFF`. The legal moves are one table
+(`state_machine.TRANSITIONS`); anything else → 409.
+1. **Report:** `POST /sos` with `symptom` (picker). With `free_text` (until the shell lands) the generic `other`
+   checklist starts immediately and the text is stored as `note`; Phase 2 adds classify → confirm → switch.
+2. **Alert + guide together:** the same request sends the `sos_reported` alert and returns step 1. Network sends
+   run as background tasks, so guidance never waits for delivery.
+3. **Display:** latest vitals from the CSV replay (`sos/vitals.py`, until M1 has a latest-reading interface):
+   per-metric value, last new measurement time, age, `ok | stale | missing`, plus `display_label`.
+   Score only via `from halo_agent.core import score_latest`; `None` → `score: null`.
+4. **Guide:** one step at a time. `done` / `skip` → `next`; `cannot_do` → `on_cannot_do`; `condition_changed` →
+   re-read vitals + score, go to `on_condition_changed` or stay.
+5. **Alert:** escalation conditions are evaluated at start and after every step.
+6. **Ack:** `POST /sos/{id}/ack` (manual, demo) sets the overlay; idempotent; allowed after the session ended.
+7. **Log:** every event is appended to `data/sos_sessions/<id>.jsonl` (env `HALO_SOS_LOG_DIR`); on
+   RESOLVED / HANDED_OFF the full session is exported to `<id>.json`.
 
-### 8.3 Escalation conditions (`escalation.yaml`, each can be toggled)
-- the score reaches max severity (3)
-- any red flag named in the protocol fires
-- the crewmate picks `cannot_do`, or an option marked `unresponsive`
-- the protocol's `escalate_if_unresolved_after` step is reached and the condition is not resolved
-- LLM classification confidence is low, or the problem is out of the checklist's scope
-- the latest reading is stale or missing (freshness_term < 0.2)
+### 8.3 Escalation conditions (`sos/escalation.py` defaults; optional `config/escalation.yaml` toggles)
+- `sos_reported`: the SOS itself (once)
+- `severity_max`: score severity 3 (once)
+- `red_flag:<rule_id>`: a red flag named in the checklist fires with status `alert` (once per rule)
+- `cannot_do`: crewmate picks `cannot_do` on a step with `on_cannot_do: escalate` (every time)
+- `unresolved_after_step`: the `escalate_if_unresolved_after` step is left and the session is not resolved (once)
+- `stale_vitals`: freshness_term < 0.2 or no reading (once)
+- `low_classification_confidence`: Phase 2 (shell)
 
-### 8.4 M7 interface (don't build Twilio)
-`Notifier` protocol with `send(event) -> state`. Ship a `QueueNotifier`: offline it returns `queued_offline`,
-and the UI text says *"Ground will receive this in ~20 min. Continue the checklist."* Ship a `ConsoleNotifier` for dev.
-A `TwilioNotifier` is optional and only if the team confirms ⚑. Recipients come from config, never from user input.
+### 8.4 M7 interface
+`AlertSender.send(AlertMessage) -> SendResult` (`halo_agent/notify/`). Recipients come only from env
+(`MISSION_SUPPORT_NUMBER`), never from a request. Message bodies are a fixed template (crew, problem type, reason,
+time, session id) — no medical text.
+- Offline (`mode=offline`) → `QueueSender`: `queued_offline`, UI text *"Ground will receive this in ~20 min.
+  Continue the checklist."* The queue is flushed on the next SOS request made online.
+- Online, `ALERT_MODE=dry_run` (default) → `DryRunSender`: logs what would be sent, calls nothing.
+- Online, `ALERT_MODE=live` → `TwilioSender` (SMS only; optional extra `alert`). Env: `TWILIO_ACCOUNT_SID`,
+  `TWILIO_AUTH_TOKEN`, `TWILIO_FROM_NUMBER`, `MISSION_SUPPORT_NUMBER`. One automatic retry; still failing →
+  `failed`, UI "Alert not delivered. Continue the checklist.", checklist continues. Trial accounts can only text
+  verified numbers.
+- **Phase 3:** voice call (TwiML), `ACK <session>` SMS replies with signature check, status callbacks.
 
 ## 9. M5 — Daily report
 
