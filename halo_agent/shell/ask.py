@@ -22,13 +22,16 @@ MAX_ANSWER_CHARS = 600
 
 SYSTEM = """You help a crew member understand the CURRENT checklist step during an emergency.
 Rules:
-- Use ONLY the step text and its source text given to you. Rephrase them in plain words; add nothing new.
-- Never diagnose, never name a disease, never mention a drug, dose or treatment that is not in the step text.
+- Use ONLY the step text and its source titles / reference given to you. Rephrase them in plain words; add nothing new.
+- Never diagnose, never name a disease. Never name any drug or dose, even if the question names one: for medication
+  questions, restate what the step says (follow the onboard Medical Checklist as the flight surgeon directs).
 - Never invent a new step or tell them to do anything the step does not say.
 - If the question is not answered by the step text, set "not_covered": true.
 Reply with JSON only: {"answer": "...", "citations": ["<step id>"], "not_covered": false}"""
 
 _NUM = re.compile(r"\d+(?:[.,]\d+)?")
+_WORD = re.compile(r"[A-Za-z][A-Za-z\-]{4,}")
+DOSE_WORDS = ("mg", "mcg", "µg", "milligram", "microgram", "tablet", "pill", "capsule", "dose", "dosage", "puffs")
 
 
 def _fixed(answer: str) -> dict:
@@ -39,17 +42,23 @@ def _numbers(text: str) -> set[str]:
     return {n.replace(",", ".") for n in _NUM.findall(text or "")}
 
 
+def _words(text: str) -> set[str]:
+    return {w.lower() for w in _WORD.findall(text or "")}
+
+
 def ask(question: str, context: Optional[dict], llm: LLMClient, mode: str) -> dict:
-    """context: {"step": {"id", "text", "source"}, "vitals": {...}} for the session's current step, or None."""
+    """context: {"step": {"id", "text", "ref", "sources": [{key, title, url, ...}]}, "vitals": {...}} or None."""
     if mode == "offline" or not llm.available():
         return _fixed(OFFLINE_REPLY)
     if context is None:
         return _fixed(NOT_COVERED)            # no session: KB retrieval not built yet
     step = context.get("step") or {}
-    text, source = step.get("text") or "", step.get("source")
-    if not step.get("id") or text.strip() == PLACEHOLDER or not source or str(source).strip() in ("", "TBD"):
+    text, sources, ref = step.get("text") or "", step.get("sources") or [], step.get("ref")
+    if not step.get("id") or text.strip() == PLACEHOLDER or not sources:
         return _fixed(NOT_COVERED)
-    payload = json.dumps({"step": {"id": step["id"], "text": text, "source": source},
+    src_text = " ".join([s.get("title") or "" for s in sources] + [ref or ""])
+    payload = json.dumps({"step": {"id": step["id"], "text": text, "ref": ref,
+                                   "sources": [s.get("title") for s in sources]},
                           "latest_vitals": context.get("vitals") or {}, "question": question}, ensure_ascii=False)
     raw = call_llm(llm, SYSTEM, payload, mode)
     if raw is None:
@@ -61,7 +70,15 @@ def ask(question: str, context: Optional[dict], llm: LLMClient, mode: str) -> di
     if (not isinstance(answer, str) or not answer.strip() or len(answer) > MAX_ANSWER_CHARS
             or not isinstance(cites, list) or not cites or any(c != step["id"] for c in cites)):
         return _fixed(NOT_COVERED)
-    allowed = _numbers(step["id"]) | _numbers(text) | _numbers(str(source)) | _numbers(json.dumps(context.get("vitals") or {}))
+    allowed = _numbers(step["id"]) | _numbers(text) | _numbers(src_text) | _numbers(json.dumps(context.get("vitals") or {}))
     if not _numbers(answer) <= allowed:
+        return _fixed(NOT_COVERED)
+    ctx_words = _words(text) | _words(src_text)
+    ans_words = _words(answer)
+    # Words the question brings in (e.g. a drug name) must not be echoed unless the step itself uses them.
+    if (_words(question) - ctx_words) & ans_words:
+        return _fixed(NOT_COVERED)
+    low = answer.lower()
+    if any(re.search(rf"\b{re.escape(w)}\b", low) for w in DOSE_WORDS if w not in text.lower()):
         return _fixed(NOT_COVERED)
     return {"answer": answer.strip(), "citations": [step["id"]], "answered_by": "llm"}

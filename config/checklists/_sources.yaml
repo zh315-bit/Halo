@@ -1,0 +1,71 @@
+# Shared source table for config/checklists/*.yaml (from sos_checklists_v2.yaml).
+# kind: team_policy is NOT a medical source (shown with medical: false).
+#
+# HALO Crew SOS checklists — v2 (DRAFT, sourced, NOT medically reviewed)
+#
+# What changed from v1
+#   - Spaceflight sources first: NASA Shuttle Medical Checklist (JSC-48031 Rev H, 2001) and the
+#     DGLRM/ESAM microgravity CPR guideline (2020). MedlinePlus is kept for general first-aid principles.
+#   - Every step has `env`: which environment it applies to. The state machine shows only the steps
+#     that match the mission's current environment and follows `next` for the rest.
+#       microgravity     – in orbit / transit (ISS, Gateway, Mars transit)
+#       partial_gravity  – lunar or Martian surface
+#       post_landing     – back in 1 g after flight
+#     A step with no `env` applies everywhere.
+#     Skipped steps are followed through their `next`, so environment variants are chained
+#     (e.g. c1 [microgravity] -> c1g [partial_gravity, post_landing] -> c2).
+#   - Restraint ("anchor yourself and the patient") comes first in microgravity.
+#   - "Call 911" is now "alert the Crew Medical Officer (CMO) and flight surgeon".
+#   - Gravity-dependent Earth steps (lie down, raise legs, roll on side) appear only outside microgravity.
+#
+# Field meanings
+#   type:     action   = do it, then press done
+#             check    = yes/no look; "condition_changed" means YES, a warning sign is present
+#             escalate = always fires escalation; the checklist continues at `next`
+#   next / on_cannot_do / on_condition_changed: step id, ESCALATE (escalate + continue to `next`), or END
+#   source:   one key or a list of keys from `sources`; `ref` = page/section where available
+#   note:     reviewer note (shown in a details panel, not as an instruction)
+#   [N — TBD]: numbers the sources don't give. Do not fill in without a source.
+#
+# Medication policy (team_policy): HALO never names a drug or dose. Where a NASA procedure includes a
+# medication step, HALO says to follow the onboard Medical Checklist as the flight surgeon directs.
+#
+# Page numbers for JSC-48031 come from a public OCR copy; verify against the PDF before citing on stage.
+
+sources:
+  nasa_medcl:
+    title: "NASA Medical Checklist, JSC-48031 Rev H (Space Shuttle, 2001)"
+    url: "https://ibiblio.org/apollo/Shuttle/Medical%20Checklist/Medical%20Checklist%20Rev%20H.pdf"
+    kind: spaceflight_procedure
+  dglrm_cpr:
+    title: "CPR during spaceflight – guideline for CPR in microgravity (DGLRM / ESAM-SMG, 2020)"
+    url: "https://sjtrem.biomedcentral.com/articles/10.1186/s13049-020-00793-y"
+    kind: spaceflight_guideline
+  nasa_oi:
+    title: "NASA HRP Evidence: Risk of Orthostatic Intolerance During Re-Exposure to Gravity"
+    url: "https://ntrs.nasa.gov/api/citations/20150007319/downloads/20150007319.pdf"
+    kind: spaceflight_evidence
+  ug_blood:
+    title: "Bloodstain pattern dynamics in microgravity (Kowalske et al.)"
+    url: "https://eprints.staffs.ac.uk/8566/1/Bloodstain%20pattern%20dynamics%20in%20microgravity_%20Observations%20of%20a%20pilot%20study%20in%20the%20next%20frontier%20of%20forensic%20science.pdf"
+    kind: spaceflight_research
+  mlp_heart_attack:
+    title: "Heart attack first aid — MedlinePlus"
+    url: "https://medlineplus.gov/ency/article/000063.htm"
+    kind: earth_first_aid
+  mlp_breathing:
+    title: "Breathing difficulties - first aid — MedlinePlus"
+    url: "https://medlineplus.gov/ency/article/000007.htm"
+    kind: earth_first_aid
+  mlp_fainting:
+    title: "Fainting — MedlinePlus"
+    url: "https://medlineplus.gov/ency/article/003092.htm"
+    kind: earth_first_aid
+  mlp_bleeding:
+    title: "Bleeding — MedlinePlus"
+    url: "https://medlineplus.gov/ency/article/000045.htm"
+    kind: earth_first_aid
+  team_policy:
+    title: "HALO team policy (not a medical source)"
+    url: null
+    kind: team_policy

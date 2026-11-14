@@ -1,0 +1,4 @@
+# HALO app settings.
+# mission_env: which checklist steps apply (AGENTS.md §8.1). microgravity | partial_gravity | post_landing
+# Override with env HALO_MISSION_ENV, or at runtime: POST /api/v1/admin/mode {"mission_env": "..."}.
+mission_env: partial_gravity

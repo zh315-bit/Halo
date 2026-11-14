@@ -74,6 +74,7 @@ class Session:
     checklist: Checklist
     symptom_source: str = "picker"
     note: Optional[str] = None
+    mission_env: str = "partial_gravity"   # fixed for the session (see mission_env.py)
     state: str = REPORTED
     current_step: Optional[str] = None     # step id, END when the checklist is complete
     steps_done: list[StepRecord] = field(default_factory=list)
@@ -114,14 +115,24 @@ class Session:
             raise IllegalTransition(self.state, "report", "session already reported")
         self.started_at = at
         self.log(at, "report", actor, REPORTED, symptom=self.checklist.symptom,
-                 protocol_id=self.checklist.protocol_id, symptom_source=self.symptom_source, note=self.note)
+                 protocol_id=self.checklist.protocol_id, symptom_source=self.symptom_source, note=self.note,
+                 mission_env=self.mission_env)
 
     def start_alert(self, at: str) -> None:
         self._move("start_alert", at, "system")
 
-    def start_guide(self, at: str) -> None:
-        self.current_step = self.checklist.start
-        self._move("start_guide", at, "system", step_id=self.current_step)
+    def _arrive(self, target: str) -> list[str]:
+        """Resolve `target` for this session's environment and enter it. An escalate-type step fires every time it
+        is entered (a step that stays where it is is not re-entered)."""
+        self.current_step = self.checklist.resolve(target, self.mission_env)
+        if self.current_step != END and self.checklist.step(self.current_step).type == "escalate":
+            return [f"escalate_step:{self.current_step}"]
+        return []
+
+    def start_guide(self, at: str) -> list[str]:
+        reasons = self._arrive(self.checklist.start)
+        self._move("start_guide", at, "system", step_id=self.current_step, escalate=reasons or None)
+        return reasons
 
     def step(self, action: str, at: str, actor: str = "crew", step_id: Optional[str] = None) -> StepOutcome:
         if action not in STEP_ACTIONS:
@@ -136,44 +147,54 @@ class Session:
 
         reasons: list[str] = []
         if action in ("done", "skip"):
-            nxt = cur.next
+            target = cur.next
         elif action == "cannot_do":
             if cur.on_cannot_do == ESCALATE:
                 reasons.append("cannot_do")
-                nxt = cur.next                      # §8.1: escalation triggers AND the checklist continues
+                target = cur.next                   # §8.1: escalation triggers AND the checklist continues
             else:
-                nxt = cur.on_cannot_do
-        else:  # condition_changed: re-check vitals (service), go to the reassess step or stay here
-            nxt = cur.on_condition_changed or cur.id
+                target = cur.on_cannot_do
+        else:  # condition_changed: on a check = YES, a warning sign; vitals are re-read by the service
+            occ = cur.on_condition_changed
+            if occ == ESCALATE:
+                reasons.append(f"warning_sign:{cur.id}")
+                target = cur.next
+            else:
+                target = occ or cur.id              # no target: stay on this step
 
-        leaving = nxt != cur.id
-        if (leaving and not self._unresolved_fired
+        if (target != cur.id and not self._unresolved_fired
                 and cur.id == self.checklist.escalate_if_unresolved_after):
             self._unresolved_fired = True
             reasons.append("unresolved_after_step")
 
         self.steps_done.append(StepRecord(cur.id, action, at, actor))
-        self.current_step = nxt
+        if target == cur.id:
+            nxt = cur.id
+        else:
+            reasons += self._arrive(target)          # env-aware: skips steps that don't apply
+            nxt = self.current_step
         self._move(action, at, actor, step_id=cur.id, next_step=nxt,
-                   escalate=reasons or None)
+                   skipped_to=nxt if (target not in (cur.id, nxt)) else None, escalate=reasons or None)
         return StepOutcome(reasons, cur.id, nxt)
 
     def confirm_symptom(self, checklist: Checklist, at: str, actor: str = "crew",
-                        from_candidates: bool = False) -> bool:
+                        from_candidates: bool = False) -> list[str]:
         """Crewmate confirms a problem type (after /classify or from the picker). Switching to another checklist
-        restarts guidance at its first step; steps already done stay in the history. Returns True if switched."""
+        restarts guidance at its first applicable step; steps already done stay in the history. Returns escalation
+        reasons (an escalate-type first step fires)."""
         if self.state != GUIDING:
             raise IllegalTransition(self.state, "confirm_symptom")
         self.symptom_source = "llm" if from_candidates else "picker"
         if checklist.protocol_id == self.checklist.protocol_id:
             self.overlay("symptom_confirmed", at, actor, symptom=checklist.symptom, symptom_source=self.symptom_source)
-            return False
+            return []
         old, old_step = self.checklist, self.current_step
-        self.checklist, self.current_step, self._unresolved_fired = checklist, checklist.start, False
+        self.checklist, self._unresolved_fired = checklist, False
+        reasons = self._arrive(checklist.start)
         self.overlay("checklist_switched", at, actor, from_protocol=old.protocol_id, to_protocol=checklist.protocol_id,
                      from_step=old_step, step_id=self.current_step, symptom=checklist.symptom,
-                     symptom_source=self.symptom_source)
-        return True
+                     symptom_source=self.symptom_source, escalate=reasons or None)
+        return reasons
 
     def acknowledge(self, at: str, by: str) -> bool:
         """Returns False (and logs nothing) if already acknowledged: ground may tap twice."""

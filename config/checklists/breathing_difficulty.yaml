@@ -1,44 +1,123 @@
-# DEMO CHECKLIST — not medically reviewed (AGENTS.md §3.1, §8.1, ⚑ Q3).
-# Every step text is the placeholder until the team supplies a public, medically reviewed source.
-# A step with an empty / missing / "TBD" source makes the whole checklist review_status: demo_unreviewed.
-# Fields: id, type (action|observe|confirm), text, source, on_cannot_do (step id | escalate),
-#         optional next (step id | END), optional on_condition_changed (step id; default: stay on this step).
+# Converted from sos_checklists_v2.yaml (DRAFT, sourced, NOT medically reviewed). Step text is verbatim.
+# Field meanings: halo_agent/sos/protocols.py and AGENTS.md §8.1.
+#   type: action | check (condition_changed = YES, a warning sign) | escalate (fires every time reached)
+#   next: step id | END.  on_cannot_do / on_condition_changed: step id | escalate | END
+#   on_cannot_do: escalate was added where v2 left it unspecified (AGENTS.md §8.3 default: cannot_do escalates).
+#   env: steps that don't apply to the mission environment are followed through `next`.
+#   source: keys into _sources.yaml; ref = page/section. note = reviewer note (details panel, not an instruction).
+#   [N — TBD]: numbers the sources don't give. Do not fill in without a source.
+# Medication policy (team_policy): HALO never names a drug or dose.
+# JSC-48031 page numbers come from a public OCR copy; verify against the PDF before citing on stage.
 
-protocol_id: breathing_v0
+protocol_id: breathing_difficulty_v2
 symptom: breathing_difficulty
-title: Breathing difficulty
-source: {title: null, url: null}
+title: "Breathing difficulty"
+review_status: sourced_unreviewed
 verified: false
-escalate_if_unresolved_after: b4
-red_flags: [spo2_low]
+show_vitals: ["spo2_pct", "resp_rate_bpm", "heart_rate_bpm"]
+red_flags: ["spo2_low"]
+start: b0
 steps:
+  - id: b0
+    type: escalate
+    text: "Alert the CMO and the flight surgeon now. Don't wait to see if it improves."
+    source: ["nasa_medcl", "mlp_breathing"]
+    ref: "JSC-48031 p.1-3"
+    next: b1
+    on_cannot_do: escalate
   - id: b1
     type: action
-    text: "[PLACEHOLDER — not medical guidance]"
-    source: TBD
+    env: ["microgravity"]
+    text: "Anchor yourself and your crewmate with the restraint belts or handholds."
+    source: nasa_medcl
+    ref: "JSC-48031 p.1-6"
+    next: b2
     on_cannot_do: escalate
   - id: b2
-    type: action
-    text: "[PLACEHOLDER — not medical guidance]"
-    source: TBD
+    type: check
+    text: "Can they speak or cough? Press 'condition changed' if they CANNOT breathe or speak."
+    source: nasa_medcl
+    ref: "JSC-48031 p.1-3 (Breathing Difficulty)"
+    next: b3
     on_cannot_do: escalate
+    on_condition_changed: b_choke
   - id: b3
-    type: observe
-    text: "[PLACEHOLDER — not medical guidance]"
-    source: TBD
+    type: check
+    text: "Did this start after dust, smoke or a chemical release? Press 'condition changed' if YES."
+    source: nasa_medcl
+    ref: "JSC-48031 p.1-3"
+    next: b4
     on_cannot_do: escalate
+    on_condition_changed: b_expo
   - id: b4
-    type: action
-    text: "[PLACEHOLDER — not medical guidance]"
-    source: TBD
+    type: check
+    text: "Check airway, breathing and pulse. Press 'condition changed' if they are not breathing or have no pulse."
+    source: ["nasa_medcl", "mlp_breathing"]
+    next: b5
     on_cannot_do: escalate
+    on_condition_changed: b_cpr
   - id: b5
-    type: observe
-    text: "[PLACEHOLDER — not medical guidance]"
-    source: TBD
+    type: action
+    text: "Give 100% oxygen with the mask until the flight surgeon says otherwise. Don't use forced oxygen on someone who is breathing."
+    source: nasa_medcl
+    ref: "JSC-48031 p.1-3, p.1-11"
+    next: b6
     on_cannot_do: escalate
   - id: b6
-    type: confirm
-    text: "[PLACEHOLDER — not medical guidance]"
-    source: TBD
+    type: action
+    text: "Loosen any tight clothing."
+    source: mlp_breathing
+    next: b7
+    on_cannot_do: escalate
+  - id: b7
+    type: action
+    text: "Medication (e.g. an inhaler): follow the onboard Medical Checklist as the flight surgeon directs."
+    source: ["team_policy", "nasa_medcl"]
+    ref: "JSC-48031 p.1-3 includes a medication step"
+    next: b8
+    on_cannot_do: escalate
+  - id: b8
+    type: check
+    text: "Is there an open wound on the chest or neck? Press 'condition changed' if YES."
+    source: ["nasa_medcl", "mlp_breathing"]
+    ref: "JSC-48031 p.1-35 (Chest Injury)"
+    next: b9
+    on_cannot_do: escalate
+    on_condition_changed: b_wound
+  - id: b9
+    type: action
+    text: "Keep watching breathing, pulse and SpO2. Quieter wheezing does not necessarily mean they are improving."
+    source: mlp_breathing
+    next: END
+    on_cannot_do: escalate
+    on_condition_changed: b4
+  - id: b_choke
+    type: escalate
+    text: "Choking: brace yourself, then give abdominal thrusts. Repeat until the object comes out. If they become unconscious, press 'condition changed'."
+    source: nasa_medcl
+    ref: "JSC-48031 p.1-4 (Choking)"
+    next: b5
+    on_cannot_do: escalate
+    on_condition_changed: b_cpr
+  - id: b_expo
+    type: action
+    text: "Move them away from the exposure and protect the rest of the crew."
+    source: nasa_medcl
+    ref: "JSC-48031 p.1-3; section 7 (Toxicology)"
+    next: b4
+    on_cannot_do: escalate
+  - id: b_wound
+    type: action
+    text: "Cover the wound with an airtight dressing. Don't remove anything stuck in it."
+    source: nasa_medcl
+    ref: "JSC-48031 p.1-35"
+    note: "Conflict for review: NASA says airtight bandage; MedlinePlus says seal three sides and leave one open."
+    next: b9
+    on_cannot_do: escalate
+  - id: b_cpr
+    type: escalate
+    text: "Start CPR. In microgravity: Evetts-Russomano method until the patient is restrained, then the handstand method. Otherwise follow the onboard procedure."
+    source: ["dglrm_cpr", "nasa_medcl"]
+    ref: "JSC-48031 p.1-6"
+    next: b9
     on_cannot_do: escalate

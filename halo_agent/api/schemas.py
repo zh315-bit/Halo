@@ -128,6 +128,8 @@ class MorningActivityAccepted(_Strict):
 StepOption = Literal["done", "cannot_do", "condition_changed", "skip"]
 SosState = Literal["REPORTED", "ALERTING", "GUIDING", "RESOLVED", "HANDED_OFF"]
 # `simulated` added: dry-run mode, nothing was actually sent.
+MissionEnv = Literal["microgravity", "partial_gravity", "post_landing"]
+ReviewStatus = Literal["demo_unreviewed", "sourced_unreviewed", "reviewed"]
 DeliveryState = Literal["not_needed", "sending", "sent", "acknowledged", "queued_offline", "failed", "simulated"]
 
 
@@ -138,7 +140,23 @@ class SosStep(_Strict):
     text: str
     source_ref: Optional[str]
     options: list[StepOption]
-    type: Optional[Literal["action", "observe", "confirm"]] = None      # sos-v0 addition
+    type: Optional[Literal["action", "check", "escalate"]] = None       # sos-v0 addition (v2 checklist types)
+    # sos-v2 additions: provenance + environment, shown in the step card / details panel
+    sources: list["SourceOut"] = Field(default_factory=list)
+    ref: Optional[str] = None                 # page / section in the source
+    note: Optional[str] = None                # reviewer note: details panel only, NOT an instruction
+    env: Optional[list[MissionEnv]] = None    # null = every environment
+    adaptation: Optional[str] = None
+    gravity_dependent: Optional[bool] = None
+    on_condition_changed_means: Optional[Literal["warning_sign"]] = None   # check steps: button = "warning sign"
+
+
+class SourceOut(_Strict):                                               # sos-v2 addition
+    key: str
+    title: str
+    url: Optional[str]
+    kind: str
+    medical: bool                             # false for team_policy
 
 
 class VitalMetric(_Strict):                                             # sos-v0 addition
@@ -216,7 +234,12 @@ class SosSession(_Strict):
     disclaimer: Literal["Decision support only. Not a diagnosis."]
     # sos-v0 additions (defaults keep the Phase 0 stub payload valid)
     state: Optional[SosState] = None
-    review_status: Optional[Literal["demo_unreviewed", "reviewed"]] = None
+    review_status: Optional[ReviewStatus] = None
+    review_label: Optional[str] = None        # sos-v2: e.g. "Sourced, not medically reviewed" (always shown)
+    mission_env: Optional[MissionEnv] = None  # sos-v2: environment this session runs in (fixed at start)
+    show_vitals: list[str] = Field(default_factory=list)   # sos-v2: vitals this checklist highlights
+    scope_note: Optional[str] = None          # sos-v2: details panel only
+    scope_sources: list[SourceOut] = Field(default_factory=list)
     checklist_title: Optional[str] = None
     checklist_complete: bool = False
     started_at: Optional[str] = None
@@ -252,7 +275,8 @@ class ProblemType(_Strict):                                             # sos-v0
     symptom: str
     title: str
     protocol_id: str
-    review_status: Literal["demo_unreviewed", "reviewed"]
+    review_status: ReviewStatus
+    review_label: str
     steps: int
 
 
@@ -285,9 +309,18 @@ class AskRequest(_Request):
     crew_id: Optional[str] = None
 
 
+class CitationSource(_Strict):            # sos-v2
+    key: str
+    title: str
+    url: Optional[str]
+    medical: bool
+
+
 class Citation(_Strict):
     kind: Literal["checklist_step", "kb_chunk"]
     id: str
+    ref: Optional[str] = None             # sos-v2: page / section of the cited step
+    sources: list[CitationSource] = Field(default_factory=list)   # sos-v2
 
 
 class AskResponse(_Strict):
@@ -339,9 +372,15 @@ class DailyReport(_Strict):
 
 # ---------- admin ----------
 class ModeRequest(_Request):
-    mode: Mode
+    mode: Optional[Mode] = None                       # sos-v2: optional so the env can be switched alone
+    mission_env: Optional[MissionEnv] = None          # sos-v2: demo switch (applies to sessions started after it)
 
 
 class ModeResponse(_Strict):
     mode: Mode
     source: Literal["env", "runtime_toggle"]
+    mission_env: Optional[MissionEnv] = None          # sos-v2
+    mission_env_source: Optional[Literal["config", "runtime_toggle"]] = None   # sos-v2
+
+
+SosStep.model_rebuild()

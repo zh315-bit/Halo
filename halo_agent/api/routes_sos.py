@@ -12,7 +12,7 @@ from halo_agent.shell.llm import LLMClient, get_llm as _env_llm
 from halo_agent.sos.service import DISCLAIMER, SosService, UnknownSession
 from halo_agent.sos.state_machine import IllegalTransition
 
-from .routes_admin import current_mode
+from .routes_admin import current_mission_env, current_mode
 from .schemas import (AskRequest, AskResponse, ClassifyRequest, ClassifyResponse, ProblemType, SosAckRequest,
                       SosConfirmRequest, SosResolveRequest, SosSession, SosStartRequest, SosStepRequest)
 
@@ -25,7 +25,7 @@ def get_service() -> SosService:
     """Lazily built so a broken checklist fails on first use with a clear error, and tests can swap it."""
     global _service
     if _service is None:
-        _service = SosService(mode_fn=current_mode)
+        _service = SosService(mode_fn=current_mode, env_fn=current_mission_env)
     return _service
 
 
@@ -112,9 +112,11 @@ def sos_classify(session_id: str, req: ClassifyRequest, bg: BackgroundTasks) -> 
 
 
 @router.post("/sos/{session_id}/confirm", response_model=SosSession)
-def sos_confirm(session_id: str, req: SosConfirmRequest) -> dict:
+def sos_confirm(session_id: str, req: SosConfirmRequest, bg: BackgroundTasks) -> dict:
     """The crewmate picks one problem type. A different type switches the checklist (event checklist_switched)."""
-    return _run(get_service().confirm_symptom, session_id, req.symptom)
+    out, jobs = _run(get_service().confirm_symptom, session_id, req.symptom)
+    _schedule(bg, jobs)
+    return out
 
 
 @router.post("/agent/ask", response_model=AskResponse)
@@ -124,5 +126,9 @@ def agent_ask(req: AskRequest) -> dict:
     out = ask.ask(req.question, ctx, get_llm(), mode)
     if req.session_id:
         _run(svc.record_ask, req.session_id, req.question, out)
-    return {**out, "citations": [{"kind": "checklist_step", "id": c} for c in out["citations"]],
+    step = (ctx or {}).get("step") or {}
+    cites = [{"kind": "checklist_step", "id": c, "ref": step.get("ref") if c == step.get("id") else None,
+              "sources": [{k: s[k] for k in ("key", "title", "url", "medical")} for s in step.get("sources", [])]
+              if c == step.get("id") else []} for c in out["citations"]]
+    return {**out, "citations": cites,
             "session_id": req.session_id, "mode": mode, "disclaimer": DISCLAIMER}

@@ -1,0 +1,99 @@
+# Converted from sos_checklists_v2.yaml (DRAFT, sourced, NOT medically reviewed). Step text is verbatim.
+# Field meanings: halo_agent/sos/protocols.py and AGENTS.md §8.1.
+#   type: action | check (condition_changed = YES, a warning sign) | escalate (fires every time reached)
+#   next: step id | END.  on_cannot_do / on_condition_changed: step id | escalate | END
+#   on_cannot_do: escalate was added where v2 left it unspecified (AGENTS.md §8.3 default: cannot_do escalates).
+#   env: steps that don't apply to the mission environment are followed through `next`.
+#   source: keys into _sources.yaml; ref = page/section. note = reviewer note (details panel, not an instruction).
+#   [N — TBD]: numbers the sources don't give. Do not fill in without a source.
+# Medication policy (team_policy): HALO never names a drug or dose.
+# JSC-48031 page numbers come from a public OCR copy; verify against the PDF before citing on stage.
+
+protocol_id: fainting_v2
+symptom: fainting
+title: "Fainting or near-fainting"
+review_status: sourced_unreviewed
+verified: false
+scope_note: "Fainting from orthostatic intolerance mainly happens on re-exposure to gravity (landing, lunar/Mars surface)."
+scope_source: "nasa_oi"
+show_vitals: ["heart_rate_bpm", "systolic_bp_mmhg", "diastolic_bp_mmhg", "spo2_pct"]
+red_flags: ["spo2_low"]
+start: f0
+steps:
+  - id: f0
+    type: check
+    text: "Are they breathing and do they have a pulse? Press 'condition changed' if NOT."
+    source: ["nasa_medcl", "mlp_fainting"]
+    next: f1
+    on_cannot_do: escalate
+    on_condition_changed: f_cpr
+  - id: f1
+    type: action
+    env: ["microgravity"]
+    text: "Anchor them so they don't drift into equipment, and keep their airway clear."
+    source: nasa_medcl
+    ref: "JSC-48031 p.1-6, p.1-39"
+    next: f1g
+    on_cannot_do: escalate
+  - id: f1g
+    type: action
+    env: ["partial_gravity", "post_landing"]
+    text: "Lay them down and raise their feet about 30 cm (12 in) above heart level."
+    source: ["mlp_fainting", "nasa_oi"]
+    next: f2
+    on_cannot_do: escalate
+  - id: f2
+    type: action
+    text: "Loosen tight clothing around the neck."
+    source: mlp_fainting
+    next: f3
+    on_cannot_do: escalate
+  - id: f3
+    type: action
+    env: ["microgravity"]
+    text: "If they vomit, clear the mouth with suction or into a sealed bag so nothing floats into the airway."
+    source: nasa_medcl
+    ref: "JSC-48031 p.1-39 (keep airway clear); vomitus into Ziploc bag"
+    next: f3g
+    on_cannot_do: escalate
+  - id: f3g
+    type: action
+    env: ["partial_gravity", "post_landing"]
+    text: "If they vomit, turn them on their side so they don't choke."
+    source: mlp_fainting
+    next: f4
+    on_cannot_do: escalate
+  - id: f4
+    type: action
+    text: "Attach the vitals monitor and record their vitals."
+    source: nasa_medcl
+    ref: "JSC-48031 p.1-44 (Shock: check vitals)"
+    next: f5
+    on_cannot_do: escalate
+  - id: f5
+    type: check
+    text: "Escalate if ANY: not alert within a couple of minutes; chest pain; pounding or irregular heartbeat; can't speak, see clearly or move a limb; seizure; injured. Press 'condition changed' if YES."
+    source: mlp_fainting
+    next: f6
+    on_cannot_do: escalate
+    on_condition_changed: escalate
+  - id: f6
+    type: action
+    env: ["partial_gravity", "post_landing"]
+    text: "Keep them lying down 10–15 minutes, then help them get up slowly. Recheck vitals."
+    source: ["mlp_fainting", "nasa_oi"]
+    next: f7
+    on_cannot_do: escalate
+  - id: f7
+    type: escalate
+    text: "Report the event to the flight surgeon, even if they recovered."
+    source: nasa_medcl
+    note: "Escalation type 'report' – non-urgent. Team to decide if this should be a lower priority than an emergency alert."
+    next: END
+    on_cannot_do: escalate
+  - id: f_cpr
+    type: escalate
+    text: "Alert the CMO and flight surgeon and start CPR. In microgravity: Evetts-Russomano method until the patient is restrained, then the handstand method."
+    source: ["dglrm_cpr", "nasa_medcl"]
+    next: f5
+    on_cannot_do: escalate

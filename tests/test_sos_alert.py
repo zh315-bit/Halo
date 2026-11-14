@@ -47,7 +47,7 @@ def make(tmp_path, monkeypatch, client):
 
 
 def start(c):
-    r = c.post("/api/v1/sos", json={"crew_id": "CREW_01", "symptom": "chest_pain"})
+    r = c.post("/api/v1/sos", json={"crew_id": "CREW_01", "symptom": "other"})   # o0: no escalate step at start
     assert r.status_code == 200, r.text
     return r.json()
 
@@ -69,7 +69,7 @@ def test_live_sends_sms_with_env_numbers(make):
     assert fake.inits == [("ACtest", "tok")]
     (call,) = fake.calls
     assert call["to"] == "+15550000002" and call["from_"] == "+15550000001"
-    assert s["session_id"] in call["body"] and "chest_pain" in call["body"] and "CREW_01" in call["body"]
+    assert s["session_id"] in call["body"] and "problem other" in call["body"] and "CREW_01" in call["body"]
     g = c.get(f"/api/v1/sos/{s['session_id']}").json()         # background task already ran
     m = g["alert"]["messages"][0]
     assert m["state"] == "sent" and m["sid"] == "SM0001" and m["sender"] == "twilio"
@@ -86,12 +86,12 @@ def test_live_retries_once_then_succeeds(make):
 def test_live_failure_shows_not_delivered_and_checklist_continues(make):
     c, fake, _ = make("live", FakeTwilio(fail_times=99))
     s = start(c)
-    assert s["state"] == "GUIDING" and s["step"]["id"] == "c1"         # guidance did not wait
+    assert s["state"] == "GUIDING" and s["step"]["id"] == "o0"         # guidance did not wait
     g = c.get(f"/api/v1/sos/{s['session_id']}").json()
     assert g["alert"]["sms_status"] == "failed" and g["alert"]["ui_message"] == "Alert not delivered. Continue the checklist."
     assert g["alert"]["messages"][0]["attempts"] == 2 and "network down" in g["alert"]["messages"][0]["error"]
     n = c.post(f"/api/v1/sos/{s['session_id']}/step", json={"action": "done"}).json()
-    assert n["step"]["id"] == "c2"
+    assert n["step"]["id"] == "o2"
 
 
 def test_live_missing_config_fails_without_calling(make):
@@ -110,7 +110,7 @@ def test_offline_queues_then_flushes_when_online(make):
     assert s["alert"]["mode"] == "offline_queue"
     assert s["alert"]["ui_message"] == "Ground will receive this in ~20 min. Continue the checklist."
     s = c.post(f"/api/v1/sos/{s['session_id']}/step", json={"action": "cannot_do"}).json()
-    assert s["step"]["id"] == "c2" and len(svc.queue.pending()) == 2
+    assert s["step"]["id"] == "o2" and len(svc.queue.pending()) == 2
     c.post("/api/v1/admin/mode", json={"mode": "online"})
     g = c.get(f"/api/v1/sos/{s['session_id']}").json()
     assert svc.queue.pending() == [] and {m["state"] for m in g["alert"]["messages"]} == {"simulated"}
@@ -120,7 +120,7 @@ def test_offline_queues_then_flushes_when_online(make):
 def test_recipient_cannot_come_from_request(make):
     # Request models ignore unknown fields (main: _Request), so a smuggled `to` is dropped, never used.
     c, fake, _ = make("live")
-    r = c.post("/api/v1/sos", json={"crew_id": "CREW_01", "symptom": "chest_pain", "to": "+19999999999",
+    r = c.post("/api/v1/sos", json={"crew_id": "CREW_01", "symptom": "other", "to": "+19999999999",
                                     "MISSION_SUPPORT_NUMBER": "+19999999999"})
     assert r.status_code == 200
     assert [call["to"] for call in fake.calls] == ["+15550000002"]

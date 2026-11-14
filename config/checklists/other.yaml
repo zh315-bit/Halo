@@ -1,34 +1,59 @@
-# DEMO CHECKLIST — not medically reviewed (AGENTS.md §3.1, §8.1, ⚑ Q3).
-# Every step text is the placeholder until the team supplies a public, medically reviewed source.
-# A step with an empty / missing / "TBD" source makes the whole checklist review_status: demo_unreviewed.
-# Fields: id, type (action|observe|confirm), text, source, on_cannot_do (step id | escalate),
-#         optional next (step id | END), optional on_condition_changed (step id; default: stay on this step).
+# Converted from sos_checklists_v2.yaml (DRAFT, sourced, NOT medically reviewed). Step text is verbatim.
+# Field meanings: halo_agent/sos/protocols.py and AGENTS.md §8.1.
+#   type: action | check (condition_changed = YES, a warning sign) | escalate (fires every time reached)
+#   next: step id | END.  on_cannot_do / on_condition_changed: step id | escalate | END
+#   on_cannot_do: escalate was added where v2 left it unspecified (AGENTS.md §8.3 default: cannot_do escalates).
+#   env: steps that don't apply to the mission environment are followed through `next`.
+#   source: keys into _sources.yaml; ref = page/section. note = reviewer note (details panel, not an instruction).
+#   [N — TBD]: numbers the sources don't give. Do not fill in without a source.
+# Medication policy (team_policy): HALO never names a drug or dose.
+# JSC-48031 page numbers come from a public OCR copy; verify against the PDF before citing on stage.
 
-protocol_id: other_v0
+protocol_id: other_v2
 symptom: other
-title: Other / general
-source: {title: null, url: null}
+title: "Something else is wrong"
+review_status: sourced_unreviewed
 verified: false
-escalate_if_unresolved_after: o3
-red_flags: []
+show_vitals: ["heart_rate_bpm", "spo2_pct", "resp_rate_bpm", "systolic_bp_mmhg", "body_temp_c"]
+red_flags: ["spo2_low", "fever", "bp_crisis"]
+start: o0
 steps:
+  - id: o0
+    type: check
+    text: "Are they responsive and breathing normally? Press 'condition changed' if NOT."
+    source: ["nasa_medcl", "mlp_breathing"]
+    next: o1
+    on_cannot_do: escalate
+    on_condition_changed: escalate
   - id: o1
     type: action
-    text: "[PLACEHOLDER — not medical guidance]"
-    source: TBD
+    env: ["microgravity"]
+    text: "Anchor yourself and your crewmate."
+    source: nasa_medcl
+    ref: "JSC-48031 p.1-6"
+    next: o2
     on_cannot_do: escalate
   - id: o2
-    type: observe
-    text: "[PLACEHOLDER — not medical guidance]"
-    source: TBD
+    type: action
+    text: "Have them stop activity and rest. Stay with them."
+    source: mlp_heart_attack
+    next: o3
     on_cannot_do: escalate
   - id: o3
     type: action
-    text: "[PLACEHOLDER — not medical guidance]"
-    source: TBD
+    text: "Give nothing by mouth until the flight surgeon says it's OK."
+    source: mlp_breathing
+    next: o4
     on_cannot_do: escalate
   - id: o4
-    type: confirm
-    text: "[PLACEHOLDER — not medical guidance]"
-    source: TBD
+    type: action
+    text: "Note when symptoms started, attach the vitals monitor and record vitals."
+    source: ["nasa_medcl", "team_policy"]
+    next: o5
+    on_cannot_do: escalate
+  - id: o5
+    type: escalate
+    text: "Contact the flight surgeon and describe what you see. If the symptoms match another checklist, switch to it."
+    source: ["nasa_medcl", "team_policy"]
+    next: END
     on_cannot_do: escalate
