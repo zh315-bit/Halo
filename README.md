@@ -3,7 +3,7 @@
 NASA Space Apps Challenge 2026 — *Create Health Monitoring Software for Astronauts on Space Missions*.
 
 **HALO is a prototype, not a medical device.** Every output is decision support only, not a diagnosis.
-Implementation rules live in [AGENTS.md](AGENTS.md).
+Implementation rules live in [AGENTS.md](AGENTS.md). Wiring the scan page or the dashboard: [docs/INTEGRATION.md](docs/INTEGRATION.md).
 
 ## Run
 
