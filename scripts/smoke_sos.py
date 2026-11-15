@@ -37,7 +37,10 @@ class Skip(Exception):
 
 def client(url: str | None):
     if url:
-        import httpx2 as httpx  # installed with fastapi's test client deps / anthropic
+        try:
+            import httpx2 as httpx  # comes with the anthropic SDK (uv sync --extra llm)
+        except ImportError:
+            import httpx            # dev dependency, always installed with `uv sync`
 
         class Remote:
             def __init__(self):
