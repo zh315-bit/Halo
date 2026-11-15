@@ -152,3 +152,35 @@ def test_payload_live_crew_drops_in_bed_fields():
                       "scan_verdict": {"label": "Scan verdict", "verdict": "rest", "readiness_score": 76}}
     assert gaps == ["sleep compared with your usual", "docking error compared with earlier scans",
                     "trends (heart rate)"]
+
+
+# ---------- report-v3: plain language, no statistics terms ----------
+from halo_agent.config_loader import load_report_config  # noqa: E402
+from halo_agent.report.daily import ReportConfig  # noqa: E402
+from halo_agent.report.templates import plain_deviation  # noqa: E402
+
+BANDS = ReportConfig.from_dict(load_report_config()).deviation_words
+
+
+@pytest.mark.parametrize("z,word", [(2.0, "slightly"), (2.7, "slightly"), (3.0, "clearly"), (3.9, "clearly"),
+                                    (4.0, "well"), (4.7, "well"), (9.1, "well")])
+def test_deviation_words_from_config(z, word):
+    t = f"Resting heart rate 79 bpm is {z} robust SD above your baseline (72 bpm)."
+    assert plain_deviation(t, BANDS) == f"Resting heart rate 79 bpm is {word} above your usual 72 bpm."
+    pooled = f"SpO2 94 % is {z} robust SD below your all-activity baseline (98 %)."
+    assert plain_deviation(pooled, BANDS) == f"SpO2 94 % is {word} below your usual 98 %."
+
+
+def test_report_shows_no_statistics_terms(report):
+    rep = report["get"](FakeLLM(available=False), date="2026-11-20")
+    text = json.dumps(rep)
+    assert "robust SD" not in text and "z_band" not in text
+    assert "Resting heart rate 79 bpm is well above your usual 72 bpm." in rep["watch_items"]
+    assert "Resting SpO2 94 % is slightly below your usual 98 %." in rep["watch_items"]
+
+
+@pytest.mark.parametrize("term", ["robust SD", "SD", "z-score", "sigma", "standard deviation", "Std Dev"])
+def test_statistics_terms_rejected(report, term):
+    fields, _ = payload(report["template"])
+    assert rejection(f"Your duty status is rest. Your heart rate is several {term} above your usual.", fields) \
+        == "statistics_term"

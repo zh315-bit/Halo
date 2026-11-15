@@ -27,19 +27,23 @@ import json
 import re
 from typing import Optional
 
+from ..config_loader import load_report_config
 from .ask import _DOSE_EXPR, _TOKEN, is_drug
 from .cache import cacheable, get_cache
 from .llm import LLMClient, call_llm
 
-PROMPT_VERSION = "report-v2"      # bump when SYSTEM or the payload shape changes (part of the cache key)
+PROMPT_VERSION = "report-v3"      # bump when SYSTEM or the payload shape changes (part of the cache key)
 MAX_WORDS = 80
 _NUM = re.compile(r"(?<![\w.])\d+(?:\.\d+)?")
 _TRAILING_ZERO = re.compile(r"(?<![\w.])\d+\.0\b(?!\.\d)")
-_UNIT_AFTER = re.compile(r"\s*(?:bpm|%|percent|minutes?|min|hours?|h\b|µGy|uGy|robust SD|SD|days?|mmHg|°C|/min|"
+_UNIT_AFTER = re.compile(r"\s*(?:bpm|%|percent|minutes?|min|hours?|h\b|µGy|uGy|days?|mmHg|°C|/min|"
                          r"breaths|ms|s\b|seconds?|readings?|scans?|nights?)", re.IGNORECASE)
 _HR_SPO2 = re.compile(r"heart rate|\bHR\b|SpO2|SpO₂|oxygen", re.IGNORECASE)
 _DATE_TIME = re.compile(r"\b\d{4}-\d{2}-\d{2}\b|\b\d{1,2}:\d{2}\b")
 _FIELD_NAME = re.compile(r"\b[a-z]+_[a-z_]+\b")
+_FORBIDDEN = re.compile(r"\b(?:" + "|".join(re.escape(t) for t in sorted(
+    load_report_config().get("plain_language", {}).get("forbidden_terms") or ["robust SD"], key=len, reverse=True))
+    + r")\b", re.IGNORECASE)
 _LABEL = {"heart_rate_bpm": "heart rate", "resp_rate_bpm": "respiratory rate", "systolic_bp_mmhg": "systolic BP",
           "diastolic_bp_mmhg": "diastolic BP", "body_temp_c": "body temperature", "spo2_pct": "SpO2"}
 _TEST_LABEL = {"docking_error_pct": "docking error", "docking_on_target_pct": "docking time on target",
@@ -52,7 +56,9 @@ Rules (all mandatory):
 - Use only facts in the JSON. Do not add facts, causes, interpretations or advice.
 - Use only numbers that appear in the JSON. Do not round, convert units or compute new numbers. Write whole numbers
   without decimals: "420", not "420.0".
-- Every number carries its unit: bpm, %, minutes, µGy, robust SD, days.
+- Every number carries its unit: bpm, %, minutes, µGy, days.
+- Never use statistics terms (SD, standard deviation, z-score, sigma). Say how far from usual in plain words,
+  as the watch items do: "slightly above your usual 72 bpm", "well below your usual 98 %".
 - Write naturally. Never copy field names (no words with underscores) and never echo raw values like
   "0.0 versus your baseline": say "same as usual", "higher than usual", "not trending".
 - Recommendations: use only the sentences in `recommendations` (you may shorten them slightly), or none if empty.
@@ -192,6 +198,8 @@ def rejection(text: str, fields: dict) -> Optional[str]:
         return "duty_status_missing"
     if _FIELD_NAME.search(text):
         return "field_name_copied"
+    if _FORBIDDEN.search(text):
+        return "statistics_term"
     if any(is_drug(t) for t in _TOKEN.findall(text)) or _DOSE_EXPR.search(text):
         return "medicine_or_dose"
     return None

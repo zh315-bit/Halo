@@ -378,6 +378,13 @@ Additions (2026-11-14): `crew_source: synthetic | live`; `sleep.source: in_bed_e
 - When duty is `caution` only because the baseline is still building (no assessable reading, `baseline_building`
   set), `watch_items` has "Baseline building (n/needed): not enough history to compare yet" and the summary says
   "Caution because your personal baseline is still building (n/needed): not enough history to compare yet." (any crew).
+- **Plain language (2026-11-14):** the report never shows statistics terms or rule ids.
+  - A watch item's "79 bpm is 4.7 robust SD above your baseline (72 bpm)" becomes "79 bpm is well above your
+    usual 72 bpm".
+  - The word comes from |z| via `report.yaml plain_language.deviation_words` (`team_derived`): < 3 slightly,
+    < 4 clearly, else well.
+  - The overnight alert count names "far from your usual" / "red flag spo2 low" instead of rule ids.
+  - `ScoreResult.reasons[].text` (score API, SOS) is unchanged.
 - Any crew: a reading on which no vital could be assessed (all `insufficient`) is not used for duty, so a building
   baseline never gives `ready`.
 - `environment_context` adds optional `reference_date, dose_day_ugy, level, threshold_source, source,
@@ -632,7 +639,7 @@ camera_scan`, fed by main's `POST /api/v1/scan`). Everything live is labelled **
 5. **Shell rewrite (online):** the LLM receives **only the structured fields** and writes one paragraph.
    Validate the result: every number in the text must appear in the fields. If validation fails, fall back
    to the template and set `summary_generated_by: "template"`.
-   **Built (2026-11-14), `shell/rewrite.py` (`report-v2`), called by `GET …/daily-report` through `call_llm()`:**
+   **Built (2026-11-14), `shell/rewrite.py` (`report-v3`), called by `GET …/daily-report` through `call_llm()`:**
    - The model gets only the fields that mean something for this crew (`payload()`): live crews get
      self-reported sleep, scan tests and the Scan verdict; synthetic crews get time in bed and the morning activity.
    - Null, empty or `insufficient` fields are never sent. Code appends one sentence,
@@ -645,6 +652,7 @@ camera_scan`, fed by main's `POST /api/v1/scan`). Everything live is labelled **
      - every number in a sentence about heart rate or SpO₂ has a unit;
      - the `duty_status` word appears;
      - no snake_case field name is copied;
+     - no statistics term (`report.yaml plain_language.forbidden_terms`: SD, standard deviation, z-score, sigma, …);
      - no medicine name or dose expression (`config/ask_guard.yaml`).
    - Only `summary_text` / `summary_generated_by` can change. The fixed disclaimer is appended by code.
    - Offline, no LLM, timeout, error or a failed check → template.
@@ -683,7 +691,7 @@ camera_scan`, fed by main's `POST /api/v1/scan`). Everything live is labelled **
   restart; `shell/cache.py`) and replayed: same question → same displayed result, `not_covered` flag included.
   `/agent/ask` key: `[PROMPT_VERSION, model, step id, step-text hash, normalized question (lowercase, collapsed
   spaces), reading_id]`; `/classify` key: `[PROMPT_VERSION, model, normalized text + problem types]`. **Bump
-  `PROMPT_VERSION`** (`ask-v2`, `classify-v1`, `report-v2`) whenever a system prompt or payload changes. Errors/timeouts are not
+  `PROMPT_VERSION`** (`ask-v2`, `classify-v1`, `report-v3`) whenever a system prompt or payload changes. Errors/timeouts are not
   cached; only clients with `cacheable = True` (the real `AnthropicLLM`) are. `DELETE /api/v1/admin/llm-cache` →
   `{cleared, file}` empties it. Live check (costs money, skipped by
   default): `HALO_LIVE_LLM=1 … pytest tests/test_sos_llm_live.py`. Offline / no LLM →

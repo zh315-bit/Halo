@@ -14,9 +14,10 @@ from typing import Optional
 from ..core.config import ScoringConfig
 from ..core.models import VITAL_METRICS, ScoreResult, VitalsReading
 from ..core.rules import STATUS_RANK
-from .templates import _LABEL, live_summary_text, summary_text
+from .templates import _LABEL, live_summary_text, plain_deviation, summary_text
 
 DISCLAIMER = "Decision support only. Not a diagnosis."
+_RULE_WORDS = {"z_band": "far from your usual", "trend": "trend"}   # watch items never show rule ids
 UTC = timezone.utc
 
 
@@ -32,6 +33,7 @@ class ReportConfig:
     duty_consecutive: int
     rec: dict
     live: dict
+    deviation_words: tuple = ()
 
     @classmethod
     def from_dict(cls, d: dict) -> "ReportConfig":
@@ -41,7 +43,9 @@ class ReportConfig:
                    min_nights=int(d["min_nights_for_baseline"]), min_mornings=int(d["min_mornings_for_baseline"]),
                    duty_map=dict(d["duty_status"]), morning_window_hours=float(d["morning_window_hours"]),
                    duty_consecutive=int(d["duty_consecutive"]),
-                   rec=dict(d["recommendations"]), live=dict(d.get("live") or {}))
+                   rec=dict(d["recommendations"]), live=dict(d.get("live") or {}),
+                   deviation_words=tuple((b.get("below"), str(b["word"])) for b in
+                                         (d.get("plain_language") or {}).get("deviation_words") or []))
 
 
 def mission_day_of(d: date, scfg: ScoringConfig) -> int:
@@ -199,7 +203,7 @@ def build_live_report(crew_id: str, d: date, history: list[tuple[VitalsReading, 
     for _, sc in recent + today:
         for x in sc.reasons:
             if (x.metric, x.rule_id) in found:
-                latest_text[(x.metric, x.rule_id)] = (STATUS_RANK[x.status], x.text)
+                latest_text[(x.metric, x.rule_id)] = (STATUS_RANK[x.status], plain_deviation(x.text, rcfg.deviation_words))
     watch.extend(t for _, t in sorted(latest_text.values(), key=lambda v: -v[0]))
 
     days = int(scfg.trend_window) if scfg.trend_unit == "days" else 0
@@ -299,12 +303,14 @@ def build_daily_report(crew_id: str, d: date, history: list[tuple[VitalsReading,
     for _, sc in morning_all:                       # most recent wording of each finding that counted
         for x in sc.reasons:
             if (x.metric, x.rule_id) in found:
-                latest_text[(x.metric, x.rule_id)] = (STATUS_RANK[x.status], x.text)
+                latest_text[(x.metric, x.rule_id)] = (STATUS_RANK[x.status], plain_deviation(x.text, rcfg.deviation_words))
     watch.extend(t for _, t in sorted(latest_text.values(), key=lambda v: -v[0]))
     night_alerts = [s for r, s in window if s.status == "alert"]
     if night_alerts:
         rules = sorted({x.rule_id for s in night_alerts for x in s.reasons if x.status == "alert"})
-        watch.append(f"{len(night_alerts)} alert reading(s) since {lo:%H:%M} the previous day ({', '.join(rules)}).")
+        why = ", ".join(_RULE_WORDS.get(r, f"red flag {r.replace('_', ' ')}") for r in rules)
+        n = len(night_alerts)
+        watch.append(f"{n} alert reading{'s' if n != 1 else ''} since {lo:%H:%M} the previous day ({why}).")
 
     recommendations = _recommendations(vitals_trend, latest_rest[0] if latest_rest else None, duty, scfg, rcfg)
 

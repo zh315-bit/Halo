@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from typing import Optional
 
 _LABEL = {"heart_rate_bpm": "heart rate", "resp_rate_bpm": "respiratory rate", "systolic_bp_mmhg": "systolic BP",
@@ -96,3 +97,21 @@ def live_summary_text(rep: dict, level: Optional[str], n_scans: int, consecutive
         parts.append(s + ".")
     parts.append(rep["disclaimer"])
     return " ".join(parts)
+
+
+_DEVIATION = re.compile(r"(\d+(?:\.\d+)?) robust SD (above|below) your (?:all-activity )?baseline \(([^)]+)\)")
+
+
+def plain_deviation(text: str, bands: tuple) -> str:
+    """'is 4.7 robust SD above your baseline (72 bpm)' -> 'is well above your usual 72 bpm' (report.yaml
+    plain_language.deviation_words). Text without that phrase is returned unchanged."""
+    if not bands:
+        return text
+
+    def word(z: float) -> str:
+        for below, w in bands:
+            if below is None or z < float(below):
+                return w
+        return bands[-1][1]
+
+    return _DEVIATION.sub(lambda m: f"{word(float(m.group(1)))} {m.group(2)} your usual {m.group(3)}", text)

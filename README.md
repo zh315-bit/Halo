@@ -157,6 +157,7 @@ All values are in `config/scoring.yaml` and `config/red_flags.yaml`; nothing is 
 | `days_to_alert` | shown when 0 < d ≤ 14 | team_derived | — |
 | Confidence | baseline × freshness (1 up to 30 min → 0 at 6 h) × completeness | team_derived | — |
 | Daily report duty (`ready` / `caution` / `rest`) | resting readings of the last 4 h before the report (live crews: the last 2 scans), z level counts after 2 new readings in a row; trends and red flags (any activity) count at once; nothing assessable → `caution` | team_derived | — |
+| Report wording of deviations | \|z\| < 3 "slightly", < 4 "clearly", else "well" above/below your usual; no statistics terms in the report | team_derived | — |
 | Live report comparisons | self-reported sleep and the docking / reaction scores vs the median of ≥ 3 earlier scans of the same crew | team_derived | — |
 | Report recommendations | three fixed sentences, no medical content | team_policy | — |
 | Red flag `spo2_low` | SpO₂ < 90 % | guideline | **no** |
