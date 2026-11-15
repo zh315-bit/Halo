@@ -44,7 +44,7 @@ SCORE_RESULT = {
     "reasons": [
         {"metric": "heart_rate_bpm", "value": 93.0, "baseline_median": 84.0, "deviation_mad": 2.1,
          "direction": "high", "status": "caution", "source": "baseline", "rule_id": "z_band",
-         "text": "Resting heart rate 93 bpm is 2.1 robust SD above your baseline (84 bpm)."},
+         "text": "Resting heart rate 93 bpm, noticeably above your usual 84 bpm."},
         {"metric": "heart_rate_bpm", "value": 93.0, "baseline_median": 84.0, "deviation_mad": 2.1,
          "direction": "trend_up", "status": "caution", "source": "baseline", "rule_id": "trend",
          "text": "Resting heart rate is rising about 3.1 bpm per day."},

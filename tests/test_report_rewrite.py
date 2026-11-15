@@ -154,29 +154,50 @@ def test_payload_live_crew_drops_in_bed_fields():
                     "trends (heart rate)"]
 
 
-# ---------- report-v3: plain language, no statistics terms ----------
-from halo_agent.config_loader import load_report_config  # noqa: E402
-from halo_agent.report.daily import ReportConfig  # noqa: E402
-from halo_agent.report.templates import plain_deviation  # noqa: E402
+# ---------- plain language, no statistics terms (scoring.yaml deviation_words) ----------
+from datetime import datetime, timezone  # noqa: E402
 
-BANDS = ReportConfig.from_dict(load_report_config()).deviation_words
+from halo_agent.core.models import Baseline, VitalsReading  # noqa: E402
+from halo_agent.core.rules import deviation_word, evaluate_new  # noqa: E402
 
-
-@pytest.mark.parametrize("z,word", [(2.0, "slightly"), (2.7, "slightly"), (3.0, "clearly"), (3.9, "clearly"),
-                                    (4.0, "well"), (4.7, "well"), (9.1, "well")])
-def test_deviation_words_from_config(z, word):
-    t = f"Resting heart rate 79 bpm is {z} robust SD above your baseline (72 bpm)."
-    assert plain_deviation(t, BANDS) == f"Resting heart rate 79 bpm is {word} above your usual 72 bpm."
-    pooled = f"SpO2 94 % is {z} robust SD below your all-activity baseline (98 %)."
-    assert plain_deviation(pooled, BANDS) == f"SpO2 94 % is {word} below your usual 98 %."
+CFG = load_scoring_config()
 
 
-def test_report_shows_no_statistics_terms(report):
+@pytest.mark.parametrize("z,word", [(0.5, ""), (1.99, ""), (2.0, "noticeably"), (2.9, "noticeably"),
+                                    (3.0, "clearly"), (3.99, "clearly"), (4.0, "well"), (9.1, "well")])
+def test_deviation_words_aligned_with_bands(z, word):
+    assert deviation_word(z, CFG) == word
+
+
+def _eval(metric, value, median, sigma, group="resting", streak=0):
+    r = VitalsReading(reading_id="R", crew_id="C", timestamp=datetime(2026, 11, 15, tzinfo=timezone.utc),
+                      mission_day=1, activity="resting", measurement_origin="SIMULATED", **{metric: value})
+    return evaluate_new(r, metric, Baseline(median=median, sigma=sigma, n=20, group=group), "ok", streak, [], CFG)
+
+
+def test_reason_text_is_plain_and_deviation_mad_kept():
+    ev = _eval("heart_rate_bpm", 93.0, 84.0, 4.3)
+    (x,) = ev.reasons
+    assert x.text == "Resting heart rate 93 bpm, noticeably above your usual 84 bpm."
+    assert x.deviation_mad == 2.09 and ev.indicator.deviation_mad == 2.09 and x.status == "caution"
+    (y,) = _eval("spo2_pct", 94.0, 98.0, 1.4826, group="pooled").reasons
+    assert y.text == "SpO2 94 %, noticeably below your usual 98 % (all activities)."
+    first = _eval("heart_rate_bpm", 100.0, 84.0, 4.3).reasons[0]          # beyond alert once: debounce note
+    assert first.text == ("Resting heart rate 100 bpm, clearly above your usual 84 bpm. First reading this far "
+                          "from usual; an alert needs 2 new readings in a row.")
+    alert = _eval("heart_rate_bpm", 104.0, 84.0, 4.3, streak=1).reasons[0]
+    assert alert.status == "alert" and alert.text == "Resting heart rate 104 bpm, well above your usual 84 bpm."
+
+
+def test_no_statistics_terms_anywhere_in_scores_or_report(report):
+    for _, sc in core.get_engine().history("SIM_CREW_DRIFT"):
+        for x in sc.reasons:
+            assert "SD" not in x.text and "robust" not in x.text and "baseline (" not in x.text
     rep = report["get"](FakeLLM(available=False), date="2026-11-20")
     text = json.dumps(rep)
     assert "robust SD" not in text and "z_band" not in text
-    assert "Resting heart rate 79 bpm is well above your usual 72 bpm." in rep["watch_items"]
-    assert "Resting SpO2 94 % is slightly below your usual 98 %." in rep["watch_items"]
+    assert "Resting heart rate 79 bpm, well above your usual 72 bpm." in rep["watch_items"]
+    assert "Resting SpO2 94 %, noticeably below your usual 98 %." in rep["watch_items"]
 
 
 @pytest.mark.parametrize("term", ["robust SD", "SD", "z-score", "sigma", "standard deviation", "Std Dev"])

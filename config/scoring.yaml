@@ -84,6 +84,15 @@ live_data_origins: [camera_scan]
 measurable_metrics:
   camera_scan: [heart_rate_bpm, resp_rate_bpm]
 
+# Reason text says how far from usual in plain words (no statistics terms); deviation_mad keeps the number.
+# team_derived, aligned with z_bands: < 2 no adverb ("above your usual"), caution band 2–3 "noticeably",
+# 3–4 "clearly", >= 4 "well". Used by ScoreResult.reasons[].text, so the SOS and the daily report read the same.
+deviation_words:
+  - {below: 2, word: ""}
+  - {below: 3, word: noticeably}
+  - {below: 4, word: clearly}
+  - {word: well}
+
 metrics:                     # display only (reason text)
   heart_rate_bpm: {label: heart rate, unit: bpm}
   resp_rate_bpm: {label: respiratory rate, unit: /min}

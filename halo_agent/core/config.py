@@ -31,6 +31,14 @@ class RedFlag:
         return x is not None and _OPS[self.op](x, self.value)
 
 
+def _deviation_words(rows: list) -> tuple:
+    out = tuple((None if r.get("below") is None else float(r["below"]), str(r.get("word") or "")) for r in rows)
+    limits = [b for b, _ in out if b is not None]
+    if limits != sorted(limits) or (out and out[-1][0] is not None) or any(b is None for b, _ in out[:-1]):
+        raise ValueError("scoring.yaml deviation_words: ascending `below` limits, last band without a limit")
+    return out
+
+
 @dataclass(frozen=True)
 class ScoringConfig:
     engine: str
@@ -61,6 +69,7 @@ class ScoringConfig:
     days_to_alert_max: float
     data_origin: dict
     metric_display: dict
+    deviation_words: tuple        # ((below |z| or None, word), ...) for reason text, ascending
     red_flags: tuple[RedFlag, ...]
 
     def min_points_for(self, data_origin: str) -> int:
@@ -131,5 +140,6 @@ class ScoringConfig:
             days_to_alert_max=float(t["days_to_alert_max"]),
             data_origin=dict(scoring["data_origin"]),
             metric_display=dict(scoring["metrics"]),
+            deviation_words=_deviation_words(scoring.get("deviation_words") or []),
             red_flags=tuple(rules),
         )

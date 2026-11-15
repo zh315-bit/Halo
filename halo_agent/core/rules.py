@@ -40,6 +40,14 @@ def is_new_measurement(reading: VitalsReading, metric: str, seen_before: bool, p
     return any({"bp": reading.new_bp, "temp": reading.new_temp}[f] for f in flags)
 
 
+def deviation_word(abs_z: float, cfg: ScoringConfig) -> str:
+    """|robust z| -> adverb ("" below the caution band), from scoring.yaml deviation_words."""
+    for below, word in cfg.deviation_words:
+        if below is None or abs_z < below:
+            return word
+    return cfg.deviation_words[-1][1] if cfg.deviation_words else ""
+
+
 def _fmt(x: float) -> str:
     return f"{x:g}" if abs(x - round(x)) > 1e-9 else f"{x:.0f}"
 
@@ -81,13 +89,15 @@ def evaluate_new(reading: VitalsReading, metric: str, baseline: Optional[Baselin
         else:
             status = "normal"
         if status != "normal":
-            where = "your all-activity baseline" if baseline.group == POOLED else "your baseline"
+            # plain words, no statistics terms (deviation_mad keeps the number): scoring.yaml deviation_words
             group = "" if baseline.group == POOLED else baseline.group.replace("_", "-").capitalize() + " "
             lead = f"{group}{label}" if group else label[0].upper() + label[1:]
-            text = (f"{lead} {_fmt(v)} {unit} is {abs(z):.1f} robust SD "
-                    f"{'above' if z > 0 else 'below'} {where} ({_fmt(baseline.median)} {unit}).")
+            how = deviation_word(abs(z), cfg)
+            text = (f"{lead} {_fmt(v)} {unit}, {how + ' ' if how else ''}{'above' if z > 0 else 'below'} your usual "
+                    f"{_fmt(baseline.median)} {unit}{' (all activities)' if baseline.group == POOLED else ''}.")
             if zu >= cfg.alert_z and status == "caution":
-                text += f" Beyond the alert band once; alert needs {cfg.alert_consecutive} new readings in a row."
+                text += (f" First reading this far from usual; an alert needs {cfg.alert_consecutive} new readings "
+                         f"in a row.")
             reasons.append(Reason(metric=metric, value=v, baseline_median=baseline.median,
                                   deviation_mad=round(z, 2), direction="high" if z > 0 else "low",
                                   status=status, source="baseline", rule_id="z_band", text=text))

@@ -32,7 +32,7 @@ from .ask import _DOSE_EXPR, _TOKEN, is_drug
 from .cache import cacheable, get_cache
 from .llm import LLMClient, call_llm
 
-PROMPT_VERSION = "report-v3"      # bump when SYSTEM or the payload shape changes (part of the cache key)
+PROMPT_VERSION = "report-v4"      # bump when SYSTEM or the payload shape changes (part of the cache key)
 MAX_WORDS = 80
 _NUM = re.compile(r"(?<![\w.])\d+(?:\.\d+)?")
 _TRAILING_ZERO = re.compile(r"(?<![\w.])\d+\.0\b(?!\.\d)")
@@ -58,7 +58,7 @@ Rules (all mandatory):
   without decimals: "420", not "420.0".
 - Every number carries its unit: bpm, %, minutes, µGy, days.
 - Never use statistics terms (SD, standard deviation, z-score, sigma). Say how far from usual in plain words,
-  as the watch items do: "slightly above your usual 72 bpm", "well below your usual 98 %".
+  as the watch items do: "noticeably above your usual 72 bpm", "well below your usual 98 %".
 - Write naturally. Never copy field names (no words with underscores) and never echo raw values like
   "0.0 versus your baseline": say "same as usual", "higher than usual", "not trending".
 - Recommendations: use only the sentences in `recommendations` (you may shorten them slightly), or none if empty.

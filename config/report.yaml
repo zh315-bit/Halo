@@ -26,13 +26,7 @@ recommendations:                  # source: team_policy. Fixed sentences, no med
   missing_data: "Take a fresh vitals reading."
   rest: "Follow the flight surgeon’s guidance before resuming duties."
 plain_language:                   # team_derived. The report never shows statistics terms to the crew.
-  # A watch item "... 79 bpm is 4.7 robust SD above your baseline (72 bpm)." is shown as
-  # "... 79 bpm is well above your usual 72 bpm." The word comes from |robust z| (the first band whose
-  # `below` is above it; the last band has no limit). z bands start at 2 (caution) and 3 (alert, scoring.yaml).
-  deviation_words:
-    - {below: 3, word: slightly}
-    - {below: 4, word: clearly}
-    - {word: well}
+  # Deviation wording ("well above your usual 72 bpm") comes from scoring.yaml deviation_words (reason text).
   # The LLM rewrite is rejected if it uses any of these (case-insensitive).
   forbidden_terms: ["robust SD", "standard deviation", "std dev", "SD", "z-score", "z score", "sigma", "MAD"]
 live:                             # crews fed by real camera scans (POST /api/v1/scan); team_derived
